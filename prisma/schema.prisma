@@ -1,0 +1,488 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  CASHIER
+  KITCHEN
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PaymentStatus {
+  PENDING
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+}
+
+model User {
+  id              Int         @id @default(autoincrement())
+  username        String      @unique
+  password        String
+  role            Role        @default(CASHIER)
+  status          UserStatus  @default(ACTIVE)
+  pinCode         String?     // 4-digit PIN for quick cashier switching
+  canUnlockScreen Boolean     @default(false) // Permission to unlock locked screens
+  lastLoginAt     DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime?   @updatedAt
+  shifts          Shift[]
+}
+
+model Shift {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  openedAt        DateTime @default(now())
+  closedAt        DateTime?
+  startingCash    Float    @default(0) // Initial float/cash at shift start
+  endingCash      Float?   // Physical cash counted at shift end
+  expectedCash    Float?   // Expected cash based on startingCash + cashSales
+  cashSales       Float    @default(0)
+  cardSales       Float    @default(0)
+  onlineSales     Float    @default(0)
+  totalRevenue    Float    @default(0)
+  discrepancy     Float?   // Difference between expected and actual cash (positive = excess, negative = shortage)
+  notes           String?
+  status          ShiftStatus @default(OPEN)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@index([openedAt])
+  @@index([status])
+}
+
+enum ShiftStatus {
+  OPEN
+  CLOSED
+}
+
+enum AlertChannel {
+  EMAIL
+  SMS
+  BOTH
+  TELEGRAM
+}
+
+enum OrderSource {
+  STORE_POS
+  UBER_EATS
+  PICKME
+}
+
+enum DeliveryPlatform {
+  UBER_EATS
+  PICKME
+}
+
+model Supplier {
+  id           Int          @id @default(autoincrement())
+  name         String
+  phone        String
+  company      String
+  category     String?      // Legacy field for backward compatibility
+  categoryId   Int?
+  subCategoryId Int?
+  categoryRef  Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  subCategoryRef SubCategory? @relation(fields: [subCategoryId], references: [id], onDelete: SetNull)
+  creditLimit  Float?       @default(0)
+  currentBalance Float?     @default(0)
+  creditPeriod Int?         @default(30) // Default 30 days credit period
+  contactPerson String?     // Contact person name
+  email        String?      // Contact email
+  address      String?      // Physical address
+  products     Product[]
+  grns         GRN[]
+  ledgerEntries SupplierLedger[]
+  purchaseOrders PurchaseOrder[]
+}
+
+model Category {
+  id              Int          @id @default(autoincrement())
+  name            String       @unique
+  description     String?
+  isActive        Boolean      @default(true)
+  displayOrder    Int          @default(0) // For drag-and-drop reordering
+  color           String?      // Hex color code for category branding
+  imageUrl        String?      // Category icon/image URL
+  taxRate         Float?       @default(0) // Default tax rate % for products in this category
+  activeHoursStart String?     // Start time for availability (e.g., "06:00")
+  activeHoursEnd  String?     // End time for availability (e.g., "23:00")
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @default(now()) @updatedAt
+  subCategories   SubCategory[]
+  products        Product[]
+  suppliers       Supplier[]
+  grns            GRN[]
+}
+
+model SubCategory {
+  id          Int          @id @default(autoincrement())
+  name        String
+  categoryId  Int
+  category    Category     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  displayOrder Int         @default(0) // For drag-and-drop reordering
+  color       String?      // Hex color code for subcategory branding
+  imageUrl    String?      // Subcategory icon/image URL
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  products    Product[]
+  suppliers   Supplier[]
+  grns        GRN[]
+
+  @@unique([categoryId, name])
+}
+
+model Product {
+  id           Int          @id @default(autoincrement())
+  name         String
+  category     String       // Legacy field for backward compatibility
+  categoryId   Int?
+  subCategoryId Int?
+  categoryRef  Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  subCategoryRef SubCategory? @relation(fields: [subCategoryId], references: [id], onDelete: SetNull)
+  costPrice    Float
+  sellingPrice Float
+  packagingCost Float?      @default(0)
+  currentStock Int          @default(0)
+  reorderLevel Int?         @default(10) // Reorder threshold
+  supplierId   Int?
+  supplier     Supplier?    @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  imageUrl     String?      // Product image URL
+  grns         GRN[]
+  orders       Order[]
+  stockBatches  StockBatch[]
+  purchaseOrderItems PurchaseOrderItem[]
+  costHistory  ProductCostHistory[]
+  productType  String?      // 'ready-made' or 'made-to-order'
+  trackStock   Boolean      @default(true)
+  externalUberEatsId String? // External product ID from Uber Eats
+  externalPickMeId String?   // External product ID from PickMe
+  recipeItems  RecipeItem[] // Bill of Materials for made-to-order items
+  recipeIngredients RecipeItem[] @relation("RecipeIngredient") // When this product is used as an ingredient
+}
+
+model GRN {
+  id              Int      @id @default(autoincrement())
+  invoiceNumber   String?
+  poNumber        String?
+  paymentType     String?
+  creditPeriod    Int?
+  dueDate         DateTime?
+  receivedDate    DateTime @default(now())
+  productId       Int
+  quantity        Int
+  freeQuantity    Int?     @default(0)
+  uom             String?
+  unitCost        Float
+  discount        Float?   @default(0)
+  discountType    String?
+  landedCost      Float?   @default(0)
+  freightCost     Float?   @default(0)
+  handlingCost    Float?   @default(0)
+  taxCost         Float?   @default(0)
+  trueUnitCost    Float?   // Calculated true cost including landed costs
+  totalAmount     Float?   @default(0) // Total invoice amount for payment tracking
+  balanceAmount   Float?   @default(0) // Remaining balance after payments
+  expiryDate      DateTime?
+  batchNumber     String?
+  qcStatus        String?  @default("Passed")
+  rejectedQty     Int?     @default(0)
+  rejectionReason String?
+  paymentStatus   PaymentStatus @default(PENDING)
+  paidAmount      Float?   @default(0)
+  supplierId      Int
+  categoryId      Int?
+  subCategoryId   Int?
+  categoryRef     Category?    @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  subCategoryRef  SubCategory? @relation(fields: [subCategoryId], references: [id], onDelete: SetNull)
+  product         Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  supplier        Supplier @relation(fields: [supplierId], references: [id])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Order {
+  id            Int      @id @default(autoincrement())
+  productId     Int
+  quantity      Int
+  subtotal      Float?
+  tax           Float?   @default(0)
+  discount      Float?   @default(0)
+  totalPrice    Float
+  paymentMethod String
+  customerName  String?
+  customerPhone String?
+  cardAuthCode  String?  // Terminal approval/auth code for card payments
+  cardType      String?  // Card network: Visa, MasterCard, AMEX, Other
+  qrRefNo       String?  // QR transaction reference number
+  shiftId       Int?     // Link to the active shift when order was placed
+  orderSource   OrderSource @default(STORE_POS) // Source of the order: STORE_POS, UBER_EATS, PICKME
+  deliveryOrderId String?  // External order ID from delivery platform
+  deliveryPlatform DeliveryPlatform? // Which delivery platform (if applicable)
+  commission    Float?   @default(0) // Platform commission amount
+  createdAt     DateTime @default(now())
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([shiftId])
+  @@index([createdAt])
+  @@index([orderSource])
+  @@index([deliveryOrderId])
+}
+
+model StoreSettings {
+  id                   Int     @id @default(autoincrement())
+  shopName             String
+  slogan               String?
+  description          String?
+  logoUrl              String?
+  phone1               String?
+  phone2               String?
+  address              String?
+  reportEmail          String?
+  themeType            String  @default("solid")
+  primaryColor         String  @default("#f59e0b")
+  gradientFrom         String  @default("#f59e0b")
+  gradientTo           String  @default("#ec4899")
+  sidebarBg            String  @default("#0f172a")
+  accentColor          String  @default("#e11d48")
+  brNumber             String?
+  receiptFooterMessage  String?
+  facebookLink         String?
+  whatsappNumber       String?
+  defaultDeliveryCharge Float?  @default(0)
+  currencySymbol       String  @default("Rs.")
+  receiptPrinterSize   String  @default("80mm")
+  // Business hours
+  businessHoursStart   String? // e.g., "06:00"
+  businessHoursEnd     String? // e.g., "22:00"
+  businessDays        String? @default("0,1,2,3,4,5,6") // Comma-separated days (0=Sunday, 6=Saturday)
+  // Tax settings
+  vatRate              Float?  @default(0) // VAT percentage
+  nbtRate              Float?  @default(0) // NBT percentage
+  taxInclusive         Boolean @default(false) // Tax inclusive pricing
+  // Receipt toggles
+  printLogoOnReceipt   Boolean @default(true)
+  displayTaxBreakdown  Boolean @default(true)
+  autoOpenCashDrawer   Boolean @default(false)
+  includeQRCode        Boolean @default(false)
+  receiptHeaderMessage String?
+  showNoticeOnReceipt  Boolean @default(false)
+  // Hardware settings
+  kotPrinterIp         String?
+  kotPrinterPort       Int?
+  cashDrawerTrigger    String? // ESC/POS command sequence
+  // QR code settings
+  qrCodeUrl            String?
+  qrCodeLabel          String?
+  paymentQrUrl         String? // Payment QR code image for POS (LANKAQR / Pay&Go)
+  // Low stock settings
+  lowStockThreshold    Int     @default(5) // Threshold for low stock alerts
+  // Export settings
+  exportFormat         String  @default("csv") // Default export file format: csv, xlsx, pdf
+  // Notification settings for cashier shift alerts
+  adminNotificationEmail  String?
+  adminNotificationMobile String?
+  enableLoginAlerts      Boolean @default(true)
+  preferredAlertChannel  AlertChannel @default(BOTH)
+  telegramChatId         String?
+  telegramBotToken       String?
+  // Shift settings
+  defaultShiftFloat       Float?  @default(0) // Default opening cash balance for new shifts
+  allowEditOpeningBalance Boolean @default(true) // Allow cashiers to edit opening balance
+  // Delivery Platform Integrations
+  uberEatsEnabled         Boolean @default(false)
+  uberEatsMerchantId     String?
+  uberEatsApiKey         String?
+  uberEatsClientSecret   String?
+  uberEatsWebhookUrl     String?
+  pickMeEnabled          Boolean @default(false)
+  pickMeMerchantId       String?
+  pickMeApiKey           String?
+  pickMeSecretToken      String?
+  pickMeWebhookUrl       String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @default(now()) @updatedAt
+}
+
+enum OfferType {
+  FIXED_COMBO
+  BOGO
+  PERCENTAGE_DISCOUNT
+  CART_TRIGGER
+}
+
+enum TriggerType {
+  ALL_PRODUCTS
+  SELECTED_CATEGORY
+  SELECTED_PRODUCTS
+  MIN_BILL_AMOUNT
+}
+
+model SpecialOffer {
+  id                Int       @id @default(autoincrement())
+  name              String
+  offerType         OfferType @default(FIXED_COMBO)
+  promoPrice        Float?
+  items             String    @db.Text // JSON array of objects: [{ productId: number, quantity: number, isFree: boolean }]
+  isActive          Boolean   @default(true)
+  startDate         DateTime? @default(now())
+  endDate           DateTime?
+  startTime         String?   // Time window start (e.g., "16:00")
+  endTime           String?   // Time window end (e.g., "18:00")
+  activeDays        String?   @default("0,1,2,3,4,5,6") // Comma-separated days (0=Sunday, 6=Saturday)
+  minBillAmount     Float?    // For percentage discount offers
+  discountPercentage Float?   // For percentage discount offers
+  // Cart Trigger fields
+  triggerType       TriggerType? // For CART_TRIGGER offers
+  triggerCategories String?   @db.Text // JSON array of category IDs
+  triggerProducts   String?   @db.Text // JSON array of product IDs
+  triggerMinAmount  Float?    // Minimum bill amount to trigger
+  rewardItems       String?   @db.Text // JSON array of reward items: [{ productId: number, quantity: number, isFree: boolean, discountPrice: number }]
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+}
+
+model StockBatch {
+  id          Int      @id @default(autoincrement())
+  productId   Int
+  batchNumber String
+  quantity    Int
+  freeQuantity Int     @default(0)
+  uom         String?
+  unitCost    Float
+  trueUnitCost Float?  // True cost including landed costs
+  expiryDate  DateTime
+  receivedDate DateTime @default(now())
+  grnId       Int?
+  currentQuantity Int @default(0)
+  isExpiringSoon Boolean @default(false) // Flag for expiry alerts
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([productId, batchNumber])
+}
+
+model SupplierLedger {
+  id              Int      @id @default(autoincrement())
+  supplierId      Int
+  grnId           Int?
+  referenceType   String
+  referenceNumber String?
+  debit           Float?   @default(0)
+  credit          Float?   @default(0)
+  balance         Float?
+  paymentMethod   String?
+  remainingBalance Float?
+  dueDate         DateTime?
+  isPaid          Boolean  @default(false)
+  paidDate        DateTime?
+  notes           String?
+  supplier        Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model PurchaseOrder {
+  id              Int      @id @default(autoincrement())
+  poNumber        String   @unique
+  supplierId      Int
+  orderDate       DateTime @default(now())
+  expectedDate    DateTime?
+  status          String?
+  totalAmount     Float?
+  notes           String?
+  supplier        Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  items           PurchaseOrderItem[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model PurchaseOrderItem {
+  id              Int      @id @default(autoincrement())
+  purchaseOrderId Int
+  productId       Int
+  quantity        Int
+  receivedQuantity Int     @default(0)
+  unitCost        Float
+  totalAmount     Float?
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product         Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model ProductCostHistory {
+  id          Int      @id @default(autoincrement())
+  productId   Int
+  unitCost    Float
+  trueUnitCost Float?
+  supplierId  Int
+  grnId       Int?
+  receivedDate DateTime @default(now())
+  variancePercentage Float? // Percentage change from previous cost
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@index([productId])
+  @@index([receivedDate])
+}
+
+model CreditNote {
+  id          Int      @id @default(autoincrement())
+  supplierId  Int
+  grnId       Int
+  noteNumber  String   @unique
+  totalAmount Float
+  reason      String
+  status      String   @default("Draft") // Draft, Sent, Accepted, Rejected
+  items       CreditNoteItem[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model CreditNoteItem {
+  id           Int      @id @default(autoincrement())
+  creditNoteId Int
+  productId    Int
+  quantity     Int
+  unitCost     Float
+  totalAmount  Float
+  reason       String
+  creditNote   CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+}
+
+model RecipeItem {
+  id          Int      @id @default(autoincrement())
+  productId   Int      // The finished product
+  ingredientId Int     // The raw ingredient (another product)
+  quantity    Float    // Quantity of ingredient needed per unit of finished product
+  unit        String   @default("kg") // Unit of measurement
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  ingredient  Product  @relation("RecipeIngredient", fields: [ingredientId], references: [id], onDelete: Cascade)
+}
+
+model NotificationLog {
+  id        String   @id @default(cuid())
+  type      String   // "CASHIER_LOGIN", "DRAWER_MISMATCH", etc.
+  recipient String   // Phone or Email
+  channel   String   // "EMAIL", "SMS", "TELEGRAM"
+  status    String   // "SUCCESS", "FAILED"
+  error     String?
+  createdAt DateTime @default(now())
+}

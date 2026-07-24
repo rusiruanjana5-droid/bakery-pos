@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary-color: #f59e0b;
+  --sidebar-bg: #0f172a;
+  --accent-color: #e11d48;
+  --gradient-from: #f59e0b;
+  --gradient-to: #ec4899;
+}
+
+.bg-primary {
+  background-color: var(--primary-color, #f59e0b);
+}
+
+.bg-primary:hover {
+  background-color: color-mix(in srgb, var(--primary-color, #f59e0b) 90%, black);
+}
+
+.bg-sidebar {
+  background-color: var(--sidebar-bg, #0f172a);
+}
+
+.bg-accent {
+  background-color: var(--accent-color, #e11d48);
+}
+
+.text-primary {
+  color: var(--primary-color, #f59e0b);
+}
+
+.text-accent {
+  color: var(--accent-color, #e11d48);
+}
+@media print {
+  h1, h2, h3, .section-title {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  table {
+    page-break-inside: auto;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .report-section {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+}

@@ -1,28 +1,140 @@
-# Dependencies
+# ==========================
+# Node.js Dependencies
+# ==========================
 node_modules/
+.pnpm-store/
+.yarn/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
 
+# ==========================
 # Next.js
+# ==========================
 .next/
 out/
+dist/
+build/
 
+# Next.js cache
+.next/cache/
+
+# ==========================
 # Prisma
+# ==========================
 prisma/migrations/
+prisma/*.db
+prisma/*.db-journal
 
-# Environment variables
+# Prisma generated files
+node_modules/.prisma/
+prisma/generated/
+
+# ==========================
+# Environment Variables
+# ==========================
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env.example
 
+# ==========================
+# Electron
+# ==========================
+release/
+releases/
+electron-builder.yml
+*.blockmap
+
+# Electron build output
+dist-electron/
+app-builds/
+
+# ==========================
 # Logs
+# ==========================
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# IDE
+# ==========================
+# Runtime Files
+# ==========================
+*.pid
+*.seed
+*.pid.lock
+
+# ==========================
+# OS Files
+# ==========================
+.DS_Store
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ==========================
+# IDE / Editors
+# ==========================
 .vscode/
 .idea/
 *.swp
 *.swo
+*.swn
+
+# ==========================
+# TypeScript
+# ==========================
+*.tsbuildinfo
+
+# ==========================
+# Testing
+# ==========================
+coverage/
+.nyc_output/
+
+# ==========================
+# Temporary Files
+# ==========================
+*.tmp
+*.temp
+.cache/
+.temp/
+
+# ==========================
+# Images / Uploads
+# ==========================
+uploads/
+public/uploads/
+
+# ==========================
+# Database Files
+# ==========================
+*.sqlite
+*.sqlite3
+*.db
+
+# ==========================
+# Backup Files
+# ==========================
+*.bak
+*.backup
+*.old
+
+# ==========================
+# VS Code Extensions
+# ==========================
+.history/
+
+# ==========================
+# Local Configuration
+# ==========================
+*.local
+
+# ==========================
+# Electron Packager
+# ==========================
+*.asar

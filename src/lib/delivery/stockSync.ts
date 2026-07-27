@@ -1,5 +1,6 @@
 // @ts-ignore - Prisma client needs regeneration after schema update
 import prisma from '@/db'
+import { getStoreSettings } from '@/actions/store'
 
 /**
  * Stock Synchronization Service
@@ -10,7 +11,7 @@ class StockSyncService {
    * Sync a single product's stock status to all enabled platforms
    */
   async syncProductStock(productId: number, stock: number): Promise<void> {
-    const storeSettings = await prisma.storeSettings.findFirst()
+    const storeSettings = await getStoreSettings()
     const product = await prisma.product.findUnique({
       where: { id: productId }
     })
@@ -36,7 +37,7 @@ class StockSyncService {
    * Sync stock status to Uber Eats
    */
   private async syncToUberEats(externalId: string, isOutOfStock: boolean): Promise<void> {
-    const storeSettings = await prisma.storeSettings.findFirst()
+    const storeSettings = await getStoreSettings()
     
     if (!storeSettings?.uberEatsEnabled || !storeSettings.uberEatsApiKey) {
       return
@@ -54,7 +55,7 @@ class StockSyncService {
    * Sync stock status to PickMe
    */
   private async syncToPickMe(externalId: string, isOutOfStock: boolean): Promise<void> {
-    const storeSettings = await prisma.storeSettings.findFirst()
+    const storeSettings = await getStoreSettings()
     
     if (!storeSettings?.pickMeEnabled || !storeSettings.pickMeApiKey) {
       return
@@ -72,7 +73,7 @@ class StockSyncService {
    * Bulk sync all products to enabled platforms
    */
   async syncAllProducts(): Promise<{ uberEats: number; pickMe: number; errors: number }> {
-    const storeSettings = await prisma.storeSettings.findFirst()
+    const storeSettings = await getStoreSettings()
     const products = await prisma.product.findMany({
       where: {
         OR: [

@@ -61,6 +61,10 @@ export async function getStoreSettings() {
       telegramBotToken: null,
       defaultShiftFloat: 0,
       allowEditOpeningBalance: true,
+      uberEatsEnabled: false,
+      uberEatsApiKey: null,
+      pickMeEnabled: false,
+      pickMeApiKey: null,
       createdAt: new Date(),
       updatedAt: new Date()
     }

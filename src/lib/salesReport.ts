@@ -1,3 +1,4 @@
+import { getStoreSettings } from '@/actions/store'
 import prisma from '@/db'
 import {
   generateSalesReportExcel,
@@ -64,7 +65,7 @@ export async function buildSalesReportBuffer(
   const [orders, summary, storeSettings] = await Promise.all([
     getOrdersInRange(dateRange.start, dateRange.end),
     getSalesSummary(dateRange),
-    prisma.storeSettings.findFirst(),
+    getStoreSettings(),
   ])
 
   const shopName = storeSettings?.shopName ?? 'Bakery POS'
@@ -85,7 +86,7 @@ export async function buildSalesReportForRange(
   const [orders, summary, storeSettings] = await Promise.all([
     getOrdersInRange(dateRange.start, dateRange.end),
     getSalesSummary(dateRange),
-    prisma.storeSettings.findFirst(),
+    getStoreSettings(),
   ])
 
   const shopName = storeSettings?.shopName ?? 'Bakery POS'

@@ -1,6 +1,7 @@
 // @ts-ignore - Prisma client needs regeneration after schema update
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/db'
+import { getStoreSettings } from '@/actions/store'
 // @ts-ignore - Prisma client needs regeneration after schema update
 import { OrderSource, DeliveryPlatform } from '@prisma/client'
 
@@ -13,7 +14,7 @@ export async function POST(request: NextRequest) {
     // const signature = request.headers.get('x-pickme-signature')
     
     // Get store settings to verify integration is enabled
-    const storeSettings = await prisma.storeSettings.findFirst()
+    const storeSettings = await getStoreSettings()
     if (!storeSettings?.pickMeEnabled) {
       return NextResponse.json(
         { success: false, error: 'PickMe integration not enabled' },
@@ -137,7 +138,7 @@ async function restoreStock(productId: number, quantity: number) {
 
 async function syncStockStatus(productId: number, status: string) {
   // Sync stock status to Uber Eats and PickMe
-  const storeSettings = await prisma.storeSettings.findFirst()
+  const storeSettings = await getStoreSettings()
   
   if (storeSettings?.uberEatsEnabled) {
     // TODO: Call Uber Eats API to set item as unavailable

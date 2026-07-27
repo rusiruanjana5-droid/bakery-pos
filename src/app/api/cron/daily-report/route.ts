@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import prisma from '@/db'
+import { getStoreSettings } from '@/actions/store'
 import { getLast24HoursRange } from '@/lib/reportUtils'
 import { buildSalesReportForRange } from '@/lib/salesReport'
 import { sendDailyReportToAdmin } from '@/lib/emailService'
@@ -29,7 +30,7 @@ async function handleDailyReport(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const storeSettings = await prisma.storeSettings.findFirst()
+    const storeSettings = await getStoreSettings()
     const adminEmail =
       storeSettings?.reportEmail || process.env.REPORT_EMAIL || process.env.EMAIL_SERVER_USER
 

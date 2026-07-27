@@ -1,5 +1,6 @@
 // @ts-ignore - Prisma client needs regeneration after schema update
 import prisma from '@/db'
+import { getStoreSettings } from '@/actions/store'
 // @ts-ignore - Prisma client needs regeneration after schema update
 import { OrderSource, DeliveryPlatform } from '@prisma/client'
 
@@ -159,7 +160,7 @@ class OfflineOrderQueue {
    * Sync stock status to external platforms
    */
   private async syncStockStatus(productId: number, status: string): Promise<void> {
-    const storeSettings = await prisma.storeSettings.findFirst()
+    const storeSettings = await getStoreSettings()
     
     if (storeSettings?.uberEatsEnabled) {
       console.log(`Syncing stock status to Uber Eats: Product ${productId} -> ${status}`)

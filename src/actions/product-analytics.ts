@@ -1,10 +1,11 @@
 'use server'
 
 import prisma from '@/db'
+import { getStoreSettings } from '@/actions/store'
 
 export async function getProductAnalytics() {
   const products = await prisma.product.findMany()
-  const storeSettings = await prisma.storeSettings.findFirst()
+  const storeSettings = await getStoreSettings()
   const lowStockThreshold = storeSettings?.lowStockThreshold || 5
 
   // Calculate total stock valuation (Current Stock * Cost Price)
@@ -50,7 +51,7 @@ export async function getProductStockStatus(productId: number) {
 
   if (!product.trackStock) return 'In-Service'
 
-  const storeSettings = await prisma.storeSettings.findFirst()
+  const storeSettings = await getStoreSettings()
   const lowStockThreshold = storeSettings?.lowStockThreshold || 5
 
   if (product.currentStock === 0) return 'Out of Stock'

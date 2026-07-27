@@ -1,12 +1,14 @@
 'use server'
 
 import prisma, { localPrisma } from '@/db'
-import bcrypt from 'bcrypt'
+import bcrypt from 'bcryptjs'
 import { setSession, destroySession, SessionData, sessionOptions } from '@/lib/session'
 import { redirect } from 'next/navigation'
 import { startShift } from './shift'
 import { cookies } from 'next/headers'
 import { getIronSession } from 'iron-session'
+import { sendShiftStartNotification } from '@/lib/notificationService'
+import { getStoreSettings } from './store'
 
 export async function login(formData: FormData) {
   const username = formData.get('username') as string
@@ -50,12 +52,46 @@ export async function login(formData: FormData) {
   session.isLoggedIn = true
   await session.save()
 
+  // Send cashier login notification asynchronously (non-blocking)
+  if (user.role === 'CASHIER') {
+    sendLoginNotificationAsync(user.id, user.username).catch(
+      (error: Error) => console.error('Login notification error (non-blocking):', error)
+    )
+  }
+
   // Clear any cached shift data in session storage (client-side will handle this)
   // Redirect cashiers to shift check page (shift will be started via modal)
   if (user.role === 'CASHIER') {
     redirect('/pos?checkShift=true&forceRefresh=true')
   } else {
     redirect('/')
+  }
+}
+
+// Helper function to send login notification asynchronously
+async function sendLoginNotificationAsync(userId: number, cashierUsername: string) {
+  try {
+    const storeSettings = await getStoreSettings()
+
+    if (!storeSettings || !storeSettings.enableLoginAlerts) {
+      return
+    }
+
+    await sendShiftStartNotification(
+      {
+        cashierName: cashierUsername,
+        cashierUsername,
+        shiftId: 0, // Login notification, not tied to a specific shift yet
+        openingBalance: 0,
+        previousClosingBalance: undefined,
+        notes: 'Cashier logged in',
+        timestamp: new Date(),
+        storeName: storeSettings.shopName || 'Bakery POS',
+      },
+      storeSettings
+    )
+  } catch (error) {
+    console.error('Async login notification error:', error)
   }
 }
 
@@ -220,7 +256,7 @@ export async function verifyManagerPin(pin: string) {
   return { success: true, verifiedBy: user.username, role: user.role }
 }
 
-export async function switchUserByPin(pin: string) {
+export async function switchUserByPin(pin: string, currentUserId?: number, currentShiftId?: number) {
   let user
   try {
     user = await prisma.user.findFirst({
@@ -248,6 +284,26 @@ export async function switchUserByPin(pin: string) {
     return { success: false, error: 'Invalid PIN' }
   }
 
+  // Pause current user's shift if they have an active shift (for mid-shift handover)
+  if (currentUserId && currentShiftId && user.role === 'CASHIER') {
+    try {
+      const pauseResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/shift/pause`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUserId, shiftId: currentShiftId })
+      })
+
+      if (pauseResponse.ok) {
+        console.log('Current shift paused successfully for mid-shift handover')
+      } else {
+        console.warn('Failed to pause current shift:', await pauseResponse.text())
+      }
+    } catch (error) {
+      console.error('Error pausing current shift:', error)
+      // Continue with switch even if pause fails
+    }
+  }
+
   // Set session directly in server action
   const cookieStore = await cookies()
   const session = await getIronSession<SessionData>(cookieStore, sessionOptions)
@@ -257,25 +313,30 @@ export async function switchUserByPin(pin: string) {
   session.isLoggedIn = true
   await session.save()
 
-  // Start shift if switching to cashier
+  // Resume or start shift for the new cashier
   if (user.role === 'CASHIER') {
-    await startShift(user.id)
+    try {
+      const resumeResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/shift/resume-or-start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, openingBalance: 0, notes: '' })
+      })
+
+      if (resumeResponse.ok) {
+        const result = await resumeResponse.json()
+        console.log('Shift action completed:', result.action, result.message)
+        return { success: true, user, shiftAction: result.action, shift: result.shift }
+      } else {
+        console.error('Failed to resume/start shift:', await resumeResponse.text())
+        return { success: true, user, shiftAction: 'FAILED' }
+      }
+    } catch (error) {
+      console.error('Error in resume/start shift:', error)
+      // Fallback to legacy startShift if API fails
+      const shiftResult = await startShift(user.id)
+      return { success: true, user, shiftAction: 'STARTED', shift: shiftResult.shift }
+    }
   }
 
-  return { success: true, user: { id: user.id, username: user.username, role: user.role } }
-}
-
-export async function getSession() {
-  const cookieStore = await cookies()
-  const session = await getIronSession<SessionData>(cookieStore, sessionOptions)
-
-  if (!session.isLoggedIn) {
-    return null
-  }
-
-  return {
-    userId: session.userId,
-    username: session.username,
-    role: session.role
-  }
+  return { success: true, user }
 }

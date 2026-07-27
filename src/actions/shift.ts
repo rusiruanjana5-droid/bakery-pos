@@ -10,7 +10,7 @@ export async function getActiveShift(userId: number) {
     const shift = await prisma.shift.findFirst({
       where: {
         userId,
-        status: 'OPEN'
+        status: 'ACTIVE' as any
       },
       include: {
         user: {
@@ -31,11 +31,11 @@ export async function getActiveShift(userId: number) {
 
 export async function startShift(userId: number, startingCash: number = 0, notes?: string) {
   try {
-    // Check if user already has an OPEN shift
+    // Check if user already has an ACTIVE shift
     const activeShift = await prisma.shift.findFirst({
       where: {
         userId,
-        status: 'OPEN'
+        status: 'ACTIVE'
       }
     })
 
@@ -61,7 +61,7 @@ export async function startShift(userId: number, startingCash: number = 0, notes
     const lastShift = await prisma.shift.findFirst({
       where: {
         userId,
-        status: 'CLOSED'
+        status: 'ENDED' as any
       },
       orderBy: {
         createdAt: 'desc'
@@ -70,13 +70,13 @@ export async function startShift(userId: number, startingCash: number = 0, notes
 
     const previousClosingBalance = lastShift?.endingCash ?? undefined
 
-    // Create new shift with status OPEN
+    // Create new shift with status ACTIVE
     const shift = await prisma.shift.create({
       data: {
         userId,
         startingCash,
         notes,
-        status: 'OPEN'
+        status: 'ACTIVE' as any
       }
     })
 
@@ -85,6 +85,19 @@ export async function startShift(userId: number, startingCash: number = 0, notes
       where: { id: userId },
       data: { lastLoginAt: new Date() }
     })
+
+    // Create audit log entry (will be enabled after Prisma migration)
+    // await prisma.shiftAuditLog.create({
+    //   data: {
+    //     shiftId: shift.id,
+    //     actionType: 'STARTED',
+    //     toUserId: userId,
+    //     salesSnapshot: 0,
+    //     notes: previousClosingBalance !== undefined
+    //       ? `Previous closing balance: Rs.${previousClosingBalance.toFixed(2)}`
+    //       : 'New shift started'
+    //   }
+    // })
 
     // Revalidate POS path to refresh shift state
     revalidatePath('/pos')
@@ -196,7 +209,7 @@ async function sendShiftEndNotificationAsync(
 export async function endShift(shiftId: number, actualCash: number, notes?: string) {
   try {
     console.log('endShift called with:', { shiftId, actualCash, notes })
-    
+
     const shift = await prisma.shift.findUnique({
       where: { id: shiftId },
       include: {
@@ -209,9 +222,9 @@ export async function endShift(shiftId: number, actualCash: number, notes?: stri
       return { success: false, error: `Shift with ID ${shiftId} not found` }
     }
 
-    if (shift.status !== 'OPEN') {
-      console.error('Shift is not open:', shift.status)
-      return { success: false, error: `Shift is not open (current status: ${shift.status})` }
+    if (shift.status !== 'ACTIVE' as any) {
+      console.error('Shift is not active:', shift.status)
+      return { success: false, error: `Shift is not active (current status: ${shift.status})` }
     }
 
     // Fetch all cash sales made during the shift timeframe
@@ -249,11 +262,22 @@ export async function endShift(shiftId: number, actualCash: number, notes?: stri
         expectedCash,
         discrepancy,
         notes,
-        status: 'CLOSED'
+        status: 'ENDED' as any
       }
     })
 
     console.log('Shift closed successfully:', closedShift.id)
+
+    // Create audit log entry (will be enabled after Prisma migration)
+    // await prisma.shiftAuditLog.create({
+    //   data: {
+    //     shiftId,
+    //     actionType: 'ENDED',
+    //     fromUserId: shift.userId,
+    //     salesSnapshot: totalCashSales,
+    //     notes: `Shift ended. Discrepancy: Rs.${discrepancy.toFixed(2)}`
+    //   }
+    // })
 
     // Revalidate POS path to refresh shift state
     revalidatePath('/pos')
@@ -285,7 +309,7 @@ export async function getLastShift(userId: number) {
     const shift = await prisma.shift.findFirst({
       where: {
         userId,
-        status: 'CLOSED'
+        status: 'ENDED' as any
       },
       orderBy: {
         closedAt: 'desc'

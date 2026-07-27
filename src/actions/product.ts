@@ -10,6 +10,7 @@ export async function createProduct(formData: FormData) {
   const subCategoryId = formData.get('subCategoryId') ? parseInt(formData.get('subCategoryId') as string) : null
   const costPrice = parseFloat(formData.get('costPrice') as string)
   const sellingPrice = parseFloat(formData.get('sellingPrice') as string)
+  const packagingCost = parseFloat(formData.get('packagingCost') as string) || 0
   const rawSupplierId = formData.get('supplierId') as string
   const supplierId = rawSupplierId && !isNaN(Number(rawSupplierId)) ? Number(rawSupplierId) : null
   const imageUrl = formData.get('imageUrl') as string | null
@@ -17,12 +18,21 @@ export async function createProduct(formData: FormData) {
   const data: any = {
     name,
     category,
-    categoryId,
-    subCategoryId,
     costPrice,
     sellingPrice,
+    packagingCost,
     currentStock: 0,
     imageUrl: imageUrl || null
+  }
+  
+  // Only add categoryId if it exists and is valid
+  if (categoryId !== null && !isNaN(categoryId)) {
+    data.categoryId = categoryId
+  }
+  
+  // Only add subCategoryId if it exists and is valid
+  if (subCategoryId !== null && !isNaN(subCategoryId)) {
+    data.subCategoryId = subCategoryId
   }
   
   if (supplierId !== null) {
@@ -44,6 +54,7 @@ export async function updateProduct(formData: FormData) {
   const subCategoryId = formData.get('subCategoryId') ? parseInt(formData.get('subCategoryId') as string) : null
   const costPrice = parseFloat(formData.get('costPrice') as string)
   const sellingPrice = parseFloat(formData.get('sellingPrice') as string)
+  const packagingCost = parseFloat(formData.get('packagingCost') as string) || 0
   const rawSupplierId = formData.get('supplierId') as string
   const supplierId = rawSupplierId && !isNaN(Number(rawSupplierId)) ? Number(rawSupplierId) : null
   const imageUrl = formData.get('imageUrl') as string | null
@@ -51,11 +62,20 @@ export async function updateProduct(formData: FormData) {
   const data: any = {
     name,
     category,
-    categoryId,
-    subCategoryId,
     costPrice,
     sellingPrice,
+    packagingCost,
     imageUrl: imageUrl || null
+  }
+  
+  // Only add categoryId if it exists and is valid
+  if (categoryId !== null && !isNaN(categoryId)) {
+    data.categoryId = categoryId
+  }
+  
+  // Only add subCategoryId if it exists and is valid
+  if (subCategoryId !== null && !isNaN(subCategoryId)) {
+    data.subCategoryId = subCategoryId
   }
   
   if (supplierId !== null) {

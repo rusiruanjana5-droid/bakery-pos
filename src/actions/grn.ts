@@ -2,6 +2,50 @@
 
 import prisma from '@/db'
 import { revalidatePath } from 'next/cache'
+import { updatePOStatusFromGRN } from './purchaseOrder'
+
+async function recalculateSupplierStatus(supplierId: number) {
+  // Get all GRNs for this supplier
+  const grns = await prisma.gRN.findMany({
+    where: { supplierId }
+  })
+
+  // Calculate total outstanding balance
+  let totalOutstanding = 0
+  let hasPending = false
+  let hasOverdue = false
+  const today = new Date()
+
+  for (const grn of grns) {
+    const balance = (grn.totalAmount || 0) - (grn.paidAmount || 0)
+    totalOutstanding += balance
+
+    if (balance > 0.01) {
+      hasPending = true
+      // Check if overdue
+      if (grn.dueDate && new Date(grn.dueDate) < today) {
+        hasOverdue = true
+      }
+    }
+  }
+
+  // Determine payment status
+  let paymentStatus = 'PAID'
+  if (hasOverdue) {
+    paymentStatus = 'OVERDUE'
+  } else if (hasPending) {
+    paymentStatus = 'PENDING'
+  }
+
+  // Update supplier
+  await prisma.supplier.update({
+    where: { id: supplierId },
+    data: {
+      currentBalance: totalOutstanding,
+      paymentStatus: paymentStatus as any
+    }
+  })
+}
 
 export async function createGRN(formData: FormData) {
   const productId = parseInt(formData.get('productId') as string)
@@ -28,6 +72,11 @@ export async function createGRN(formData: FormData) {
   const qcStatus = formData.get('qcStatus') as string || 'Passed'
   const rejectedQty = formData.get('rejectedQty') ? parseInt(formData.get('rejectedQty') as string) : 0
   const rejectionReason = formData.get('rejectionReason') as string || null
+  // Cheque fields
+  const chequeNumber = formData.get('chequeNumber') as string || null
+  const bankName = formData.get('bankName') as string || null
+  const chequeDate = formData.get('chequeDate') ? new Date(formData.get('chequeDate') as string) : null
+  const chequeStatus = formData.get('chequeStatus') as string || null
 
   // Calculate total landed cost
   const totalLandedCost = landedCost + freightCost + handlingCost + taxCost
@@ -98,7 +147,12 @@ export async function createGRN(formData: FormData) {
         qcStatus,
         rejectedQty,
         rejectionReason,
-        paymentStatus: 'PENDING'
+        paymentStatus: 'PENDING',
+        // Cheque fields
+        chequeNumber,
+        bankName,
+        chequeDate,
+        chequeStatus
       }
     })
 
@@ -205,9 +259,20 @@ export async function createGRN(formData: FormData) {
       })
     }
   })
+
+  // Recalculate supplier status after transaction
+  await recalculateSupplierStatus(supplierId)
+
+  // Update PO status if GRN is linked to a PO
+  if (poNumber) {
+    await updatePOStatusFromGRN(poNumber)
+  }
+
   revalidatePath('/grn')
   revalidatePath('/products')
+  revalidatePath('/suppliers')
   revalidatePath('/')
+  revalidatePath('/purchase-orders')
 }
 
 export async function updateGRN(formData: FormData) {
@@ -364,6 +429,10 @@ export async function updateGRN(formData: FormData) {
       }
     }
   })
+
+  // Recalculate supplier status after transaction
+  await recalculateSupplierStatus(supplierId)
+
   revalidatePath('/grn')
   revalidatePath('/products')
   revalidatePath('/')
@@ -374,6 +443,8 @@ export async function deleteGRN(id: number) {
     const existingGRN = await prisma.gRN.findUnique({
       where: { id }
     })
+
+    const supplierId = existingGRN?.supplierId
 
     await prisma.$transaction(async (tx: any) => {
       await tx.gRN.delete({
@@ -393,8 +464,15 @@ export async function deleteGRN(id: number) {
         })
       }
     })
+
+    // Recalculate supplier status after transaction
+    if (supplierId) {
+      await recalculateSupplierStatus(supplierId)
+    }
+
     revalidatePath('/grn')
     revalidatePath('/products')
+    revalidatePath('/suppliers')
     revalidatePath('/')
     return { success: true }
   } catch (error: any) {
@@ -406,7 +484,7 @@ export async function deleteGRN(id: number) {
 }
 
 export async function getGRNs() {
-  return prisma.gRN.findMany({
+  const grns = await prisma.gRN.findMany({
     include: {
       product: {
         include: {
@@ -419,10 +497,16 @@ export async function getGRNs() {
       subCategoryRef: true
     }
   })
+  
+  // Calculate balance dynamically for each GRN
+  return grns.map(grn => ({
+    ...grn,
+    balanceAmount: (grn.totalAmount || 0) - (grn.paidAmount || 0)
+  }))
 }
 
 export async function getPendingGRNsBySupplier(supplierId: number) {
-  return prisma.gRN.findMany({
+  const grns = await prisma.gRN.findMany({
     where: {
       supplierId,
       paymentStatus: {
@@ -437,6 +521,12 @@ export async function getPendingGRNsBySupplier(supplierId: number) {
       dueDate: 'asc'
     }
   })
+  
+  // Calculate balance dynamically for each GRN
+  return grns.map(grn => ({
+    ...grn,
+    balanceAmount: (grn.totalAmount || 0) - (grn.paidAmount || 0)
+  }))
 }
 
 export async function recordSupplierPayment(formData: FormData) {
@@ -462,7 +552,7 @@ export async function recordSupplierPayment(formData: FormData) {
       
       if (!grn || grn.paymentStatus === 'PAID') continue
       
-      const currentBalance = (grn.balanceAmount || grn.totalAmount || 0) - (grn.paidAmount || 0)
+      const currentBalance = grn.balanceAmount ?? (grn.totalAmount || 0) - (grn.paidAmount || 0)
       const paymentForThisGRN = Math.min(remainingPayment, currentBalance)
       
       if (paymentForThisGRN > 0) {
@@ -494,7 +584,7 @@ export async function recordSupplierPayment(formData: FormData) {
             referenceType: 'PAYMENT',
             referenceNumber: referenceNumber,
             credit: paymentForThisGRN,
-            balance: (grn.balanceAmount || 0) - paymentForThisGRN,
+            balance: newBalance,
             paymentMethod,
             paidDate: paymentDate,
             isPaid: true,
@@ -519,7 +609,10 @@ export async function recordSupplierPayment(formData: FormData) {
       })
     }
   })
-  
+
+  // Recalculate supplier status after transaction
+  await recalculateSupplierStatus(supplierId)
+
   revalidatePath('/grn')
   revalidatePath('/suppliers')
   return { success: true }

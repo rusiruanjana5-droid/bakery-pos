@@ -512,7 +512,7 @@ export default function StoreProfileClient({ initialSettings }: StoreProfileClie
             <HardwareTab formData={formData} setFormData={setFormData} validationErrors={validationErrors} />
           )}
           {activeTab === 'theme' && (
-            <ThemeCustomizationTab formData={formData} setFormData={setFormData} />
+            <ThemeCustomizationTab formData={formData} setFormData={setFormData} validationErrors={validationErrors} />
           )}
           {activeTab === 'notifications' && (
             <NotificationsTab formData={formData} setFormData={setFormData} validationErrors={validationErrors} />
@@ -754,8 +754,13 @@ function GeneralInfoTab({ formData, setFormData, handleFileChange, validationErr
               type="time"
               value={formData.businessHoursStart}
               onChange={(e) => setFormData({ ...formData, businessHoursStart: e.target.value })}
-              className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+              className={`w-full px-2 py-1.5 text-xs border rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8 ${
+                validationErrors.businessHoursStart ? 'border-red-500' : 'border-slate-200'
+              }`}
             />
+            {validationErrors.businessHoursStart && (
+              <p className="mt-0.5 text-xs text-red-600">{validationErrors.businessHoursStart}</p>
+            )}
           </div>
           <div>
             <label className="block text-xs font-semibold uppercase text-gray-500 mb-1">Closing Time</label>
@@ -763,8 +768,13 @@ function GeneralInfoTab({ formData, setFormData, handleFileChange, validationErr
               type="time"
               value={formData.businessHoursEnd}
               onChange={(e) => setFormData({ ...formData, businessHoursEnd: e.target.value })}
-              className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+              className={`w-full px-2 py-1.5 text-xs border rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8 ${
+                validationErrors.businessHoursEnd ? 'border-red-500' : 'border-slate-200'
+              }`}
             />
+            {validationErrors.businessHoursEnd && (
+              <p className="mt-0.5 text-xs text-red-600">{validationErrors.businessHoursEnd}</p>
+            )}
           </div>
         </div>
       </div>
@@ -1336,7 +1346,7 @@ function HardwareTab({ formData, setFormData, validationErrors }: any) {
 }
 
 // Theme Customization Tab Component
-function ThemeCustomizationTab({ formData, setFormData }: any) {
+function ThemeCustomizationTab({ formData, setFormData, validationErrors }: any) {
   // Live preview: Apply theme changes to DOM in real-time
   useEffect(() => {
     if (typeof document !== 'undefined') {
@@ -1486,11 +1496,16 @@ function ThemeCustomizationTab({ formData, setFormData }: any) {
               type="text"
               value={formData.primaryColor}
               onChange={(e) => setFormData({ ...formData, primaryColor: e.target.value })}
-              className="flex-1 px-3 py-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+              className={`flex-1 px-3 py-2 text-xs border rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent ${
+                validationErrors.primaryColor ? 'border-red-500' : 'border-gray-300'
+              }`}
               placeholder="#f59e0b"
               pattern="^#[0-9A-Fa-f]{6}$"
             />
           </div>
+          {validationErrors.primaryColor && (
+            <p className="mt-1 text-xs text-red-600">{validationErrors.primaryColor}</p>
+          )}
         </div>
 
         {/* Sidebar Background */}
@@ -1508,11 +1523,16 @@ function ThemeCustomizationTab({ formData, setFormData }: any) {
               type="text"
               value={formData.sidebarBg}
               onChange={(e) => setFormData({ ...formData, sidebarBg: e.target.value })}
-              className="flex-1 px-3 py-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+              className={`flex-1 px-3 py-2 text-xs border rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent ${
+                validationErrors.sidebarBg ? 'border-red-500' : 'border-gray-300'
+              }`}
               placeholder="#0f172a"
               pattern="^#[0-9A-Fa-f]{6}$"
             />
           </div>
+          {validationErrors.sidebarBg && (
+            <p className="mt-1 text-xs text-red-600">{validationErrors.sidebarBg}</p>
+          )}
         </div>
 
         {/* Accent Color */}
@@ -1530,11 +1550,16 @@ function ThemeCustomizationTab({ formData, setFormData }: any) {
               type="text"
               value={formData.accentColor}
               onChange={(e) => setFormData({ ...formData, accentColor: e.target.value })}
-              className="flex-1 px-3 py-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+              className={`flex-1 px-3 py-2 text-xs border rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent ${
+                validationErrors.accentColor ? 'border-red-500' : 'border-gray-300'
+              }`}
               placeholder="#e11d48"
               pattern="^#[0-9A-Fa-f]{6}$"
             />
           </div>
+          {validationErrors.accentColor && (
+            <p className="mt-1 text-xs text-red-600">{validationErrors.accentColor}</p>
+          )}
         </div>
 
         {/* Gradient Colors (only for gradient theme) */}
@@ -1556,11 +1581,16 @@ function ThemeCustomizationTab({ formData, setFormData }: any) {
                     type="text"
                     value={formData.gradientFrom}
                     onChange={(e) => setFormData({ ...formData, gradientFrom: e.target.value })}
-                    className="flex-1 px-3 py-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                    className={`flex-1 px-3 py-2 text-xs border rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent ${
+                      validationErrors.gradientFrom ? 'border-red-500' : 'border-gray-300'
+                    }`}
                     placeholder="#f59e0b"
                     pattern="^#[0-9A-Fa-f]{6}$"
                   />
                 </div>
+                {validationErrors.gradientFrom && (
+                  <p className="mt-1 text-xs text-red-600">{validationErrors.gradientFrom}</p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-semibold uppercase text-gray-500 mb-1">Gradient To</label>
@@ -1575,11 +1605,16 @@ function ThemeCustomizationTab({ formData, setFormData }: any) {
                     type="text"
                     value={formData.gradientTo}
                     onChange={(e) => setFormData({ ...formData, gradientTo: e.target.value })}
-                    className="flex-1 px-3 py-2 text-xs border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                    className={`flex-1 px-3 py-2 text-xs border rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent ${
+                      validationErrors.gradientTo ? 'border-red-500' : 'border-gray-300'
+                    }`}
                     placeholder="#ec4899"
                     pattern="^#[0-9A-Fa-f]{6}$"
                   />
                 </div>
+                {validationErrors.gradientTo && (
+                  <p className="mt-1 text-xs text-red-600">{validationErrors.gradientTo}</p>
+                )}
               </div>
             </div>
           </div>
@@ -1788,6 +1823,15 @@ function DeliveryTab({ formData, setFormData, validationErrors }: any) {
   const [uberEatsStatus, setUberEatsStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [pickMeStatus, setPickMeStatus] = useState<'idle' | 'success' | 'error'>('idle')
 
+  // Generate webhook URL based on environment
+  const getWebhookUrl = (endpoint: string) => {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001')
+    return `${baseUrl}/api/delivery/webhook/${endpoint}`
+  }
+
+  const uberEatsWebhookUrl = getWebhookUrl('uber-eats')
+  const pickMeWebhookUrl = getWebhookUrl('pickme')
+
   const testUberEatsConnection = async () => {
     setTestingUberEats(true)
     setUberEatsStatus('idle')
@@ -1907,22 +1951,22 @@ function DeliveryTab({ formData, setFormData, validationErrors }: any) {
                 <div className="relative">
                   <input
                     type="text"
-                    value={formData.uberEatsWebhookUrl || `${typeof window !== 'undefined' ? window.location.origin : ''}/api/delivery/webhook/uber-eats`}
+                    value={formData.uberEatsWebhookUrl || uberEatsWebhookUrl}
                     readOnly
                     className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-gray-50 text-gray-600"
                   />
                   <button
                     type="button"
                     onClick={() => {
-                      if (typeof window !== 'undefined') {
-                        navigator.clipboard.writeText(`${window.location.origin}/api/delivery/webhook/uber-eats`)
-                      }
+                      navigator.clipboard.writeText(uberEatsWebhookUrl)
                     }}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-green-600 hover:text-green-800"
+                    title="Copy webhook URL"
                   >
                     📋
                   </button>
                 </div>
+                <p className="mt-1 text-xs text-gray-500">Use this URL in your Uber Eats merchant dashboard to receive order webhooks</p>
               </div>
             </div>
             <button
@@ -2007,22 +2051,22 @@ function DeliveryTab({ formData, setFormData, validationErrors }: any) {
                 <div className="relative">
                   <input
                     type="text"
-                    value={formData.pickMeWebhookUrl || `${typeof window !== 'undefined' ? window.location.origin : ''}/api/delivery/webhook/pickme`}
+                    value={formData.pickMeWebhookUrl || pickMeWebhookUrl}
                     readOnly
                     className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg bg-gray-50 text-gray-600"
                   />
                   <button
                     type="button"
                     onClick={() => {
-                      if (typeof window !== 'undefined') {
-                        navigator.clipboard.writeText(`${window.location.origin}/api/delivery/webhook/pickme`)
-                      }
+                      navigator.clipboard.writeText(pickMeWebhookUrl)
                     }}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-orange-600 hover:text-orange-800"
+                    title="Copy webhook URL"
                   >
                     📋
                   </button>
                 </div>
+                <p className="mt-1 text-xs text-gray-500">Use this URL in your PickMe merchant dashboard to receive order webhooks</p>
               </div>
             </div>
             <button

@@ -7,6 +7,11 @@ export async function createSupplier(formData: FormData) {
   const name = formData.get('name') as string
   const phone = formData.get('phone') as string
   const company = formData.get('company') as string
+  const email = formData.get('email') as string || null
+  const address = formData.get('address') as string || null
+  const contactPerson = formData.get('contactPerson') as string || null
+  const creditLimit = formData.get('creditLimit') ? parseFloat(formData.get('creditLimit') as string) : null
+  const creditPeriod = formData.get('creditPeriod') ? parseInt(formData.get('creditPeriod') as string) : null
   const categoryId = formData.get('categoryId') ? parseInt(formData.get('categoryId') as string) : null
   const subCategoryId = formData.get('subCategoryId') ? parseInt(formData.get('subCategoryId') as string) : null
 
@@ -15,6 +20,11 @@ export async function createSupplier(formData: FormData) {
       name,
       phone,
       company,
+      email,
+      address,
+      contactPerson,
+      creditLimit,
+      creditPeriod,
       categoryId,
       subCategoryId
     }
@@ -27,6 +37,11 @@ export async function updateSupplier(formData: FormData) {
   const name = formData.get('name') as string
   const phone = formData.get('phone') as string
   const company = formData.get('company') as string
+  const email = formData.get('email') as string || null
+  const address = formData.get('address') as string || null
+  const contactPerson = formData.get('contactPerson') as string || null
+  const creditLimit = formData.get('creditLimit') ? parseFloat(formData.get('creditLimit') as string) : null
+  const creditPeriod = formData.get('creditPeriod') ? parseInt(formData.get('creditPeriod') as string) : null
   const categoryId = formData.get('categoryId') ? parseInt(formData.get('categoryId') as string) : null
   const subCategoryId = formData.get('subCategoryId') ? parseInt(formData.get('subCategoryId') as string) : null
 
@@ -36,6 +51,11 @@ export async function updateSupplier(formData: FormData) {
       name,
       phone,
       company,
+      email,
+      address,
+      contactPerson,
+      creditLimit,
+      creditPeriod,
       categoryId,
       subCategoryId
     }

@@ -90,7 +90,7 @@ export default async function LoginPage() {
           {/* Footer */}
           <div className="mt-6 text-center">
             <p className="text-xs text-slate-400">
-              Secure login powered by Bakery POS
+              Secure login powered by RAK System
             </p>
           </div>
         </div>

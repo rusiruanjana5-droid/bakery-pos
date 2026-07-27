@@ -67,7 +67,10 @@ export default function SupplierPaymentModal({ isOpen, onClose, supplierId, supp
   const calculateTotalSelectedBalance = () => {
     return pendingGRNs
       .filter(grn => selectedGRNs.includes(grn.id))
-      .reduce((sum, grn) => sum + (grn.balanceAmount || grn.totalAmount || 0) - (grn.paidAmount || 0), 0)
+      .reduce((sum, grn) => {
+        const balance = grn.balanceAmount ?? (grn.totalAmount || 0) - (grn.paidAmount || 0)
+        return sum + balance
+      }, 0)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -139,7 +142,7 @@ export default function SupplierPaymentModal({ isOpen, onClose, supplierId, supp
                 <h3 className="text-sm font-semibold text-gray-700 mb-3">Pending Bills</h3>
                 <div className="space-y-2 max-h-64 overflow-y-auto border border-gray-200 rounded-lg p-3">
                   {pendingGRNs.map((grn) => {
-                    const balance = (grn.balanceAmount || grn.totalAmount || 0) - (grn.paidAmount || 0)
+                    const balance = grn.balanceAmount ?? (grn.totalAmount || 0) - (grn.paidAmount || 0)
                     return (
                       <div
                         key={grn.id}

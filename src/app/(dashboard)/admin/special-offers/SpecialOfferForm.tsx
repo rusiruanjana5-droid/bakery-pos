@@ -19,7 +19,7 @@ interface SpecialOfferFormProps {
   onSubmit: (formData: FormData) => void
 }
 
-type OfferType = 'FIXED_COMBO' | 'BOGO' | 'PERCENTAGE_DISCOUNT' | 'CART_TRIGGER'
+type OfferType = 'FIXED_COMBO' | 'BOGO' | 'PERCENTAGE_DISCOUNT' | 'CART_TRIGGER' | 'BUY_X_GET_Y' | 'CART_THRESHOLD'
 
 interface TriggerItem {
   productId: number
@@ -55,6 +55,20 @@ export default function SpecialOfferForm({ products, onSubmit }: SpecialOfferFor
   const [rewardItems, setRewardItems] = useState<RewardItem[]>([
     { productId: 0, quantity: 1, isFree: true, discountPrice: 0 }
   ])
+  // Buy X Get Y state
+  const [appliesToScope, setAppliesToScope] = useState<'ALL_ITEMS' | 'CATEGORY' | 'SPECIFIC_ITEMS'>('ALL_ITEMS')
+  const [minQty, setMinQty] = useState('2')
+  const [minSpend, setMinSpend] = useState('')
+  const [rewardProductId, setRewardProductId] = useState<number>(0)
+  const [rewardQty, setRewardQty] = useState('1')
+  const [rewardDiscountPercent, setRewardDiscountPercent] = useState('100')
+  const [buyXTriggerProducts, setBuyXTriggerProducts] = useState<number[]>([])
+  const [buyXTriggerCategories, setBuyXTriggerCategories] = useState<number[]>([])
+  // Cart Threshold state
+  const [minCartAmount, setMinCartAmount] = useState('')
+  const [cartThresholdRewardProductId, setCartThresholdRewardProductId] = useState<number>(0)
+  const [cartThresholdRewardQty, setCartThresholdRewardQty] = useState('1')
+  const [rewardType, setRewardType] = useState('FREE_ITEM')
 
   const addItem = () => {
     setComboItems([...comboItems, { productId: 0, quantity: 1, isFree: false }])
@@ -139,6 +153,28 @@ export default function SpecialOfferForm({ products, onSubmit }: SpecialOfferFor
       if (triggerMinAmount) formData.append('triggerMinAmount', triggerMinAmount)
       formData.append('rewardItems', JSON.stringify(rewardItems))
     }
+    // Buy X Get Y fields
+    if (offerType === 'BUY_X_GET_Y') {
+      formData.append('appliesToScope', appliesToScope)
+      formData.append('minQty', minQty)
+      if (minSpend) formData.append('minSpend', minSpend)
+      if (rewardProductId) formData.append('rewardProductId', rewardProductId.toString())
+      formData.append('rewardQty', rewardQty)
+      formData.append('rewardDiscountPercent', rewardDiscountPercent)
+      if (appliesToScope === 'SPECIFIC_ITEMS' && buyXTriggerProducts.length > 0) {
+        formData.append('triggerProducts', JSON.stringify(buyXTriggerProducts))
+      }
+      if (appliesToScope === 'CATEGORY' && buyXTriggerCategories.length > 0) {
+        formData.append('triggerCategories', JSON.stringify(buyXTriggerCategories))
+      }
+    }
+    // Cart Threshold fields
+    if (offerType === 'CART_THRESHOLD') {
+      if (minCartAmount) formData.append('minCartAmount', minCartAmount)
+      if (cartThresholdRewardProductId) formData.append('rewardProductId', cartThresholdRewardProductId.toString())
+      formData.append('rewardQty', cartThresholdRewardQty)
+      formData.append('rewardType', rewardType)
+    }
     onSubmit(formData)
   }
 
@@ -171,10 +207,12 @@ export default function SpecialOfferForm({ products, onSubmit }: SpecialOfferFor
           onChange={(e) => setOfferType(e.target.value as OfferType)}
           className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
         >
-          <option value="FIXED_COMBO">Fixed Combo (e.g., Coffee + Donut)</option>
-          <option value="BOGO">Buy X Get Y Free (BOGO)</option>
-          <option value="PERCENTAGE_DISCOUNT">Percentage Discount on Min Bill</option>
-          <option value="CART_TRIGGER">Cart Trigger (Buy X, Get Y Free/Discounted)</option>
+          <option value="FIXED_COMBO">Fixed Combo (e.g., Coffee + Donut = Fixed Price)</option>
+          <option value="BUY_X_GET_Y">Buy X Get Y Free (BXGY / Free Gift)</option>
+          <option value="CART_THRESHOLD">Cart Threshold (Spend Rs. X Get Free Item)</option>
+          <option value="PERCENTAGE_DISCOUNT">Category / Cart Discount (%)</option>
+          <option value="BOGO">Buy One Get One (BOGO)</option>
+          <option value="CART_TRIGGER">Cart Trigger (Legacy)</option>
         </select>
       </div>
 
@@ -387,6 +425,243 @@ export default function SpecialOfferForm({ products, onSubmit }: SpecialOfferFor
             >
               + Add Reward Item
             </button>
+          </div>
+        </>
+      )}
+
+      {offerType === 'BUY_X_GET_Y' && (
+        <>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <h4 className="text-sm font-semibold text-blue-900 mb-3">TRIGGER CONDITION (BUY)</h4>
+            
+            <div className="flex-1 min-w-[200px] mb-3">
+              <label htmlFor="appliesToScope" className="block text-xs font-semibold uppercase text-gray-500 mb-1">
+                Applies To Scope
+              </label>
+              <select
+                id="appliesToScope"
+                value={appliesToScope}
+                onChange={(e) => setAppliesToScope(e.target.value as 'ALL_ITEMS' | 'CATEGORY' | 'SPECIFIC_ITEMS')}
+                className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+              >
+                <option value="ALL_ITEMS">All Products</option>
+                <option value="CATEGORY">Specific Category</option>
+                <option value="SPECIFIC_ITEMS">Specific Products</option>
+              </select>
+            </div>
+
+            {appliesToScope === 'SPECIFIC_ITEMS' && (
+              <div className="mb-3">
+                <label className="block text-xs font-semibold uppercase text-gray-500 mb-1">
+                  Trigger Products
+                </label>
+                <div className="space-y-1 max-h-32 overflow-y-auto">
+                  {products.map((product) => (
+                    <label key={product.id} className="flex items-center gap-2 cursor-pointer text-xs">
+                      <input
+                        type="checkbox"
+                        checked={buyXTriggerProducts.includes(product.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setBuyXTriggerProducts([...buyXTriggerProducts, product.id])
+                          } else {
+                            setBuyXTriggerProducts(buyXTriggerProducts.filter(id => id !== product.id))
+                          }
+                        }}
+                        className="w-4 h-4 text-amber-500 rounded focus:ring-amber-500"
+                      />
+                      <span className="text-xs text-gray-700">{product.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div>
+                <label htmlFor="minQty" className="block text-xs font-semibold uppercase text-gray-500 mb-1">
+                  Minimum Quantity Required
+                </label>
+                <input
+                  type="number"
+                  id="minQty"
+                  min="1"
+                  value={minQty}
+                  onChange={(e) => setMinQty(e.target.value)}
+                  className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+                  placeholder="e.g., 2"
+                />
+              </div>
+              <div>
+                <label htmlFor="minSpend" className="block text-xs font-semibold uppercase text-gray-500 mb-1">
+                  Minimum Spend Amount (Optional)
+                </label>
+                <input
+                  type="number"
+                  id="minSpend"
+                  step="0.01"
+                  value={minSpend}
+                  onChange={(e) => setMinSpend(e.target.value)}
+                  className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+                  placeholder="e.g., 1000"
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+            <h4 className="text-sm font-semibold text-green-900 mb-3">REWARD ITEM (GET)</h4>
+            
+            <div className="flex-1 min-w-[200px] mb-3">
+              <label htmlFor="rewardProductId" className="block text-xs font-semibold uppercase text-gray-500 mb-1">
+                Free / Discounted Item
+              </label>
+              <select
+                id="rewardProductId"
+                value={rewardProductId}
+                onChange={(e) => setRewardProductId(parseInt(e.target.value))}
+                className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+              >
+                <option value={0}>Select Reward Product</option>
+                {products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.name} (Rs. {product.sellingPrice})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div>
+                <label htmlFor="rewardQty" className="block text-xs font-semibold uppercase text-gray-500 mb-1">
+                  Reward Quantity
+                </label>
+                <input
+                  type="number"
+                  id="rewardQty"
+                  min="1"
+                  value={rewardQty}
+                  onChange={(e) => setRewardQty(e.target.value)}
+                  className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+                  placeholder="e.g., 1"
+                />
+              </div>
+              <div>
+                <label htmlFor="rewardDiscountPercent" className="block text-xs font-semibold uppercase text-gray-500 mb-1">
+                  Discount Percentage
+                </label>
+                <input
+                  type="number"
+                  id="rewardDiscountPercent"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={rewardDiscountPercent}
+                  onChange={(e) => setRewardDiscountPercent(e.target.value)}
+                  className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+                  placeholder="100 = Free"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="discountType"
+                  value="100"
+                  checked={rewardDiscountPercent === '100'}
+                  onChange={(e) => setRewardDiscountPercent(e.target.value)}
+                  className="w-3 h-3 text-amber-500 focus:ring-amber-500"
+                />
+                <span className="text-xs text-gray-700">100% Free (Rs.0.00)</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="discountType"
+                  value="custom"
+                  checked={rewardDiscountPercent !== '100'}
+                  onChange={(e) => setRewardDiscountPercent(e.target.value === 'custom' ? '50' : '100')}
+                  className="w-3 h-3 text-amber-500 focus:ring-amber-500"
+                />
+                <span className="text-xs text-gray-700">Fixed Discounted Price</span>
+              </label>
+            </div>
+          </div>
+        </>
+      )}
+
+      {offerType === 'CART_THRESHOLD' && (
+        <>
+          <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
+            <h4 className="text-sm font-semibold text-purple-900 mb-3">CART THRESHOLD SETTINGS</h4>
+            
+            <div className="flex-1 min-w-[200px] mb-3">
+              <label htmlFor="minCartAmount" className="block text-xs font-semibold uppercase text-gray-500 mb-1">
+                Minimum Cart Value (Rs.)
+              </label>
+              <input
+                type="number"
+                id="minCartAmount"
+                step="0.01"
+                value={minCartAmount}
+                onChange={(e) => setMinCartAmount(e.target.value)}
+                className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+                placeholder="e.g., 2000.00"
+                required
+              />
+            </div>
+
+            <div className="flex-1 min-w-[200px] mb-3">
+              <label htmlFor="cartThresholdRewardProductId" className="block text-xs font-semibold uppercase text-gray-500 mb-1">
+                Free Reward Product
+              </label>
+              <select
+                id="cartThresholdRewardProductId"
+                value={cartThresholdRewardProductId}
+                onChange={(e) => setCartThresholdRewardProductId(parseInt(e.target.value))}
+                className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+                required
+              >
+                <option value={0}>Select Reward Product</option>
+                {products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.name} (Rs. {product.sellingPrice})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex-1 min-w-[200px] mb-3">
+              <label htmlFor="cartThresholdRewardQty" className="block text-xs font-semibold uppercase text-gray-500 mb-1">
+                Reward Quantity
+              </label>
+              <input
+                type="number"
+                id="cartThresholdRewardQty"
+                min="1"
+                value={cartThresholdRewardQty}
+                onChange={(e) => setCartThresholdRewardQty(e.target.value)}
+                className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+                placeholder="e.g., 1"
+                required
+              />
+            </div>
+
+            <div className="flex-1 min-w-[200px]">
+              <label htmlFor="rewardType" className="block text-xs font-semibold uppercase text-gray-500 mb-1">
+                Reward Type
+              </label>
+              <select
+                id="rewardType"
+                value={rewardType}
+                onChange={(e) => setRewardType(e.target.value)}
+                className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+              >
+                <option value="FREE_ITEM">FREE_ITEM (100% Free)</option>
+              </select>
+            </div>
           </div>
         </>
       )}

@@ -1,0 +1,43 @@
+{
+  "appId": "com.raksystem.bakerypos",
+  "productName": "RAK System - Bakery POS",
+  "directories": {
+    "output": "dist"
+  },
+  "files": [
+    "electron/**/*",
+    ".next/**/*",
+    "node_modules/**/*",
+    "prisma/**/*",
+    "public/**/*",
+    "package.json"
+  ],
+  "asarUnpack": [
+    ".next/standalone/**/*",
+    ".next/static/**/*",
+    "public/**/*",
+    "prisma/**/*",
+    "generated/**/*"
+  ],
+  "extraResources": [
+    {
+      "from": ".next/standalone",
+      "to": "standalone"
+    }
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "assets/icon.png"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true
+  }
+}

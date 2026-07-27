@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import SupplierPaymentModal from '@/components/SupplierPaymentModal'
+import jsPDF from 'jspdf'
 
 interface GRN {
   id: number
@@ -45,8 +46,68 @@ export function GRNHistory({ grns }: GRNHistoryProps) {
   }
 
   const handlePrintPDF = (grn: any) => {
-    // Placeholder for PDF generation
-    alert(`Generating PDF for GRN #${grn.id} - ${grn.product?.name}\n\nPDF generation will be implemented with a library like jsPDF or react-pdf`)
+    const doc = new jsPDF()
+    
+    // Add title
+    doc.setFontSize(20)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Goods Received Note', 105, 20, { align: 'center' })
+    
+    // Add GRN number and date
+    doc.setFontSize(12)
+    doc.setFont('helvetica', 'normal')
+    doc.text(`GRN #${grn.id}`, 20, 35)
+    doc.text(`Date: ${grn.createdAt ? new Date(grn.createdAt).toLocaleDateString() : new Date().toLocaleDateString()}`, 140, 35)
+    
+    // Add separator line
+    doc.setDrawColor(200)
+    doc.line(20, 40, 190, 40)
+    
+    // Add supplier info
+    doc.setFontSize(14)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Supplier Information', 20, 50)
+    
+    doc.setFontSize(11)
+    doc.setFont('helvetica', 'normal')
+    doc.text(`Name: ${grn.supplier?.name || 'N/A'}`, 20, 58)
+    doc.text(`Payment Status: ${grn.paymentStatus || 'PENDING'}`, 20, 65)
+    
+    // Add product info
+    doc.setFontSize(14)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Product Details', 20, 80)
+    
+    doc.setFontSize(11)
+    doc.setFont('helvetica', 'normal')
+    doc.text(`Product: ${grn.product?.name || 'Unknown Product'}`, 20, 88)
+    doc.text(`Quantity: ${grn.quantity}`, 20, 95)
+    doc.text(`Unit Cost: Rs. ${grn.unitCost.toFixed(2)}`, 20, 102)
+    
+    // Add separator line
+    doc.setDrawColor(200)
+    doc.line(20, 110, 190, 110)
+    
+    // Add financial summary
+    doc.setFontSize(14)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Financial Summary', 20, 120)
+    
+    doc.setFontSize(11)
+    doc.setFont('helvetica', 'normal')
+    const totalAmount = grn.quantity * grn.unitCost
+    doc.text(`Total Amount: Rs. ${totalAmount.toFixed(2)}`, 20, 128)
+    doc.text(`Paid Amount: Rs. ${(grn.paidAmount || 0).toFixed(2)}`, 20, 135)
+    const balance = (grn.balanceAmount ?? (grn.totalAmount || 0) - (grn.paidAmount || 0))
+    doc.text(`Balance Due: Rs. ${balance.toFixed(2)}`, 20, 142)
+    
+    // Add footer
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'italic')
+    doc.text('This is a computer-generated GRN receipt.', 105, 280, { align: 'center' })
+    
+    // Save the PDF
+    doc.save(`GRN_${grn.id}_${grn.product?.name?.replace(/\s+/g, '_') || 'product'}.pdf`)
   }
 
   if (!mounted) {
@@ -84,14 +145,12 @@ export function GRNHistory({ grns }: GRNHistoryProps) {
                 Rs. {(grn.quantity * grn.unitCost).toFixed(2)}
               </span>
             </div>
-            {grn.balanceAmount !== undefined && (
-              <div className="flex justify-between items-center mb-3">
-                <span className="text-xs text-gray-600">Balance:</span>
-                <span className="text-sm font-semibold text-gray-800">
-                  Rs. {grn.balanceAmount.toFixed(2)}
-                </span>
-              </div>
-            )}
+            <div className="flex justify-between items-center mb-3">
+              <span className="text-xs text-gray-600">Balance:</span>
+              <span className="text-sm font-semibold text-gray-800">
+                Rs. {((grn.balanceAmount ?? (grn.totalAmount || 0) - (grn.paidAmount || 0))).toFixed(2)}
+              </span>
+            </div>
             <div className="flex gap-2">
               <button
                 onClick={() => handlePrintPDF(grn)}

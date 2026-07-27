@@ -3,12 +3,13 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createPOSOrder, getTodayOrders } from '@/actions/order'
-import { checkOfferEligibility } from '@/actions/specialOffer'
+import { checkOfferEligibility, checkCartThresholdOffers, checkPercentageDiscountOffers } from '@/actions/specialOffer'
 import { switchUserByPin, verifyManagerPin, verifyPinForScreenUnlock } from '@/actions/auth'
 import { startShift } from '@/actions/shift'
 import PinPadModal from '@/components/PinPadModal'
 import ShiftStartModal from '@/components/ShiftStartModal'
 import { PrinterService } from '@/lib/printerService'
+import { useFocusTrap, useAutoFocus } from '@/hooks/useFocusTrap'
 
 interface DbProduct {
   id: number
@@ -116,14 +117,14 @@ interface POSPageClientProps {
   allowEditOpeningBalance?: boolean
 }
 
-export default function POSPageClient({ 
-  initialSettings, 
-  initialProducts, 
-  initialSpecialOffers, 
-  initialCategories, 
-  initialActiveShift, 
-  initialLastShift, 
-  currentUserId, 
+export default function POSPageClient({
+  initialSettings,
+  initialProducts,
+  initialSpecialOffers,
+  initialCategories,
+  initialActiveShift,
+  initialLastShift,
+  currentUserId,
   currentUsername,
   currentUserRole,
   defaultShiftFloat = 0,
@@ -157,45 +158,103 @@ export default function POSPageClient({
     extraCharges: [] as ExtraCharge[],
     orderNote: ''
   })
+  const [autoAppliedDiscount, setAutoAppliedDiscount] = useState<{
+    offerId: number
+    offerName: string
+    discountPercent: number
+    minBillAmount: number
+  } | null>(null)
   const [isLocked, setIsLocked] = useState(false)
   const [showLockPinModal, setShowLockPinModal] = useState(false)
   const [showManagerPinModal, setShowManagerPinModal] = useState(false)
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
   const [focusedProductIndex, setFocusedProductIndex] = useState<number>(-1)
   const [focusedQuickCashIndex, setFocusedQuickCashIndex] = useState<number>(-1)
+  const [focusedCartIndex, setFocusedCartIndex] = useState<number>(-1)
+  const [focusedSection, setFocusedSection] = useState<'search' | 'categories' | 'productGrid' | 'cart'>('search')
+  const [focusedCategoryIndex, setFocusedCategoryIndex] = useState<number>(-1)
   const [showShiftModal, setShowShiftModal] = useState(false)
   const [isShiftLoading, setIsShiftLoading] = useState(true)
   const searchInputRef = useRef<HTMLInputElement>(null)
+  const categoriesRef = useRef<HTMLDivElement>(null)
+  const productGridRef = useRef<HTMLDivElement>(null)
+  const cartControlsRef = useRef<HTMLDivElement>(null)
   const cardAuthCodeRef = useRef<HTMLInputElement>(null)
   const cashReceivedRef = useRef<HTMLInputElement>(null)
   const quickCashButtonsRef = useRef<(HTMLButtonElement | null)[]>([])
 
+  // Modal refs for focus management
+  const paymentModalRef = useRef<HTMLDivElement>(null)
+  const discountModalRef = useRef<HTMLDivElement>(null)
+  const discountValueInputRef = useRef<HTMLInputElement>(null)
+  const cashReceivedInputRef = useRef<HTMLInputElement>(null)
+
+  // Enable focus traps for modals
+  useFocusTrap(showPaymentModal, paymentModalRef)
+  useFocusTrap(showDiscountModal, discountModalRef)
+
+  // Auto-focus cash received when payment modal opens
+  useAutoFocus(showPaymentModal && paymentMethod === 'cash', cashReceivedInputRef)
+  // Auto-focus discount value when discount modal opens
+  useAutoFocus(showDiscountModal, discountValueInputRef)
+
   const applyOfferReward = (offer: any) => {
     try {
-      const rewardItems = JSON.parse(offer.rewardItems)
-      rewardItems.forEach((reward: any) => {
-        const existingItem = cart.find(item => item.product.id === reward.productId)
-        if (existingItem) {
-          setCart(cart.map(item => 
-            item.product.id === reward.productId 
-              ? { ...item, quantity: item.quantity + reward.quantity }
-              : item
-          ))
-        } else {
-          const product = initialProducts?.find((p: any) => p.id === reward.productId)
-          if (product) {
-            const cartProduct: Product = {
-              id: product.id,
-              name: product.name,
-              price: reward.isFree ? 0 : reward.discountPrice || product.sellingPrice,
-              category: product.category,
-              currentStock: product.currentStock,
-              isOffer: true
-            }
-            setCart([...cart, { product: cartProduct, quantity: reward.quantity }])
+      if (offer.offerType === 'BUY_X_GET_Y') {
+        // Handle Buy X Get Y offers
+        const product = initialProducts?.find((p: any) => p.id === offer.rewardProductId)
+        if (product) {
+          const discountPercent = offer.rewardDiscountPercent || 100
+          const discountedPrice = discountPercent === 100 ? 0 : ((product.sellingPrice ?? 0) * (1 - discountPercent / 100))
+          
+          const cartProduct: Product = {
+            id: product.id,
+            name: product.name,
+            price: discountedPrice,
+            category: product.category,
+            currentStock: product.currentStock,
+            isOffer: true,
+            items: `[PROMO FREE ITEM - ${offer.name}]`
+          }
+          
+          const existingItem = cart.find(item => item.product.id === offer.rewardProductId)
+          if (existingItem) {
+            setCart(cart.map(item => 
+              item.product.id === offer.rewardProductId 
+                ? { ...item, quantity: item.quantity + offer.rewardQty, product: cartProduct }
+                : item
+            ))
+          } else {
+            setCart([...cart, { product: cartProduct, quantity: offer.rewardQty }])
           }
         }
-      })
+      } else {
+        // Handle legacy CART_TRIGGER offers
+        const rewardItems = JSON.parse(offer.rewardItems)
+        rewardItems.forEach((reward: any) => {
+          const existingItem = cart.find(item => item.product.id === reward.productId)
+          if (existingItem) {
+            setCart(cart.map(item => 
+              item.product.id === reward.productId 
+                ? { ...item, quantity: item.quantity + reward.quantity }
+                : item
+            ))
+          } else {
+            const product = initialProducts?.find((p: any) => p.id === reward.productId)
+            if (product) {
+              const cartProduct: Product = {
+                id: product.id,
+                name: product.name,
+                price: reward.isFree ? 0 : (reward.discountPrice ?? product.sellingPrice ?? 0),
+                category: product.category,
+                currentStock: product.currentStock,
+                isOffer: true
+              }
+              setCart([...cart, { product: cartProduct, quantity: reward.quantity }])
+            }
+          }
+        })
+      }
       setShowOfferPrompt(false)
       setEligibleOffers([])
     } catch (error) {
@@ -260,7 +319,8 @@ export default function POSPageClient({
   }, [discountSettings, isMounted])
 
   useEffect(() => {
-    const checkEligibleOffers = async () => {
+    const checkAndApplyOffers = async () => {
+      console.log('[DEBUG] checkAndApplyOffers triggered, cart length:', cart.length)
       if (cart.length === 0) {
         setEligibleOffers([])
         setShowOfferPrompt(false)
@@ -271,19 +331,141 @@ export default function POSPageClient({
         productId: item.product.id,
         quantity: item.quantity
       }))
+      console.log('[DEBUG] Cart items for offer check:', cartItems)
+
+      // Calculate cart subtotal (excluding promo items)
+      const cartSubtotal = cart.reduce((sum, item) => {
+        if (item.product.isOffer) return sum // Skip promo items
+        return sum + (item.product.price * item.quantity)
+      }, 0)
+      console.log('[DEBUG] Cart subtotal:', cartSubtotal)
 
       try {
         const offers = await checkOfferEligibility(cartItems)
-        setEligibleOffers(offers)
-        if (offers.length > 0) {
+        console.log('[DEBUG] Eligible offers returned:', offers)
+        const thresholdOffers = await checkCartThresholdOffers(cartSubtotal)
+        console.log('[DEBUG] Threshold offers returned:', thresholdOffers)
+        const percentageDiscountOffers = await checkPercentageDiscountOffers(cartSubtotal)
+        console.log('[DEBUG] Percentage discount offers returned:', percentageDiscountOffers)
+        
+        // Apply the first eligible percentage discount offer (highest priority)
+        if (percentageDiscountOffers.length > 0) {
+          const bestOffer = percentageDiscountOffers[0]
+          setAutoAppliedDiscount({
+            offerId: bestOffer.id,
+            offerName: bestOffer.name,
+            discountPercent: bestOffer.discountPercentage,
+            minBillAmount: bestOffer.minBillAmount
+          })
+          console.log('[DEBUG] Auto-applied discount:', bestOffer)
+        } else {
+          setAutoAppliedDiscount(null)
+        }
+        
+        // Separate Buy X Get Y and BOGO offers from legacy offers
+        const buyXGetYOffers = offers.filter(offer => offer.offerType === 'BUY_X_GET_Y' || offer.offerType === 'BOGO')
+        const legacyOffers = offers.filter(offer => offer.offerType !== 'BUY_X_GET_Y' && offer.offerType !== 'BOGO')
+        
+        // Build new cart with applied offers
+        let newCart = [...cart]
+        
+        // Step 1: Remove all existing Buy X Get Y promo items first
+        newCart = newCart.filter(item => {
+          // Keep non-promo items
+          if (!item.product.isOffer) return true
+          // Remove Buy X Get Y promo items (we'll re-add eligible ones)
+          if (item.product.items?.includes('[PROMO FREE ITEM')) {
+            return false
+          }
+          // Keep other items for now
+          return true
+        })
+        console.log('[DEBUG] After removing Buy X Get Y promo items, cart length:', newCart.length)
+        
+        // Step 2: Automatically apply Buy X Get Y offers
+        console.log('[DEBUG] Processing Buy X Get Y offers:', buyXGetYOffers)
+        for (const offer of buyXGetYOffers) {
+          console.log('[DEBUG] Processing offer:', offer)
+          const product = initialProducts?.find((p: any) => p.id === offer.rewardProductId)
+          console.log('[DEBUG] Found reward product:', product)
+          if (product) {
+            const discountPercent = offer.rewardDiscountPercent || 100
+            const discountedPrice = discountPercent === 100 ? 0 : ((product.sellingPrice ?? 0) * (1 - discountPercent / 100))
+            
+            const cartProduct: Product = {
+              id: product.id,
+              name: product.name,
+              price: discountedPrice,
+              category: product.category,
+              currentStock: product.currentStock,
+              isOffer: true,
+              items: `[PROMO FREE ITEM - ${offer.name}]`
+            }
+            
+            // Add new promo item (we already removed all existing ones)
+            console.log('[DEBUG] Adding new promo item with quantity:', offer.rewardQty)
+            newCart = [...newCart, { product: cartProduct, quantity: offer.rewardQty ?? 1, note: '' }]
+          } else {
+            console.error('[DEBUG] Reward product not found for offer:', offer.rewardProductId)
+          }
+        }
+        console.log('[DEBUG] After adding Buy X Get Y promo items, cart length:', newCart.length)
+
+        // Automatically apply Cart Threshold offers
+        for (const offer of thresholdOffers) {
+          const product = initialProducts?.find((p: any) => p.id === offer.rewardProductId)
+          if (product) {
+            const cartProduct: Product = {
+              id: product.id,
+              name: product.name,
+              price: 0, // Free item
+              category: product.category,
+              currentStock: product.currentStock,
+              isOffer: true,
+              items: `[CART THRESHOLD FREE - ${offer.name}]`
+            }
+            
+            const existingItem = newCart.find(item => item.product.id === offer.rewardProductId && item.product.items?.includes('[CART THRESHOLD FREE'))
+            if (existingItem) {
+              // Item already exists, ensure it has the correct quantity
+              newCart = newCart.map(item => 
+                item.product.id === offer.rewardProductId && item.product.items?.includes('[CART THRESHOLD FREE')
+                  ? { ...item, quantity: offer.rewardQty, product: cartProduct }
+                  : item
+              )
+            } else {
+              newCart = [...newCart, { product: cartProduct, quantity: offer.rewardQty, note: '' }]
+            }
+          }
+        }
+
+        // Handle threshold promo items removal if no threshold offers are active
+        const activeThresholdOfferIds = new Set(thresholdOffers.map(offer => offer.id))
+        if (activeThresholdOfferIds.size === 0) {
+          newCart = newCart.filter(item => !item.product.items?.includes('[CART THRESHOLD FREE'))
+        }
+
+        console.log('[DEBUG] Final cart length before state update:', newCart.length)
+        console.log('[DEBUG] Final cart items:', newCart)
+
+        // Only update cart if it changed
+        if (newCart.length !== cart.length || JSON.stringify(newCart) !== JSON.stringify(cart)) {
+          setCart(newCart)
+        }
+        
+        // Show prompt for legacy offers only
+        setEligibleOffers(legacyOffers)
+        if (legacyOffers.length > 0) {
           setShowOfferPrompt(true)
+        } else {
+          setShowOfferPrompt(false)
         }
       } catch (error) {
         console.error('Error checking offer eligibility:', error)
       }
     }
 
-    checkEligibleOffers()
+    checkAndApplyOffers()
   }, [cart])
 
   // Determine shift modal state based on initial data
@@ -291,18 +473,20 @@ export default function POSPageClient({
     // Simulate brief loading to prevent flash of wrong state
     const timer = setTimeout(() => {
       setIsShiftLoading(false)
-      
+
       // Only show shift modal for non-admin users if no active shift exists (from server data)
       // Admin users bypass shift management
       if (currentUserRole === 'ADMIN') {
         setShowShiftModal(false)
       } else if (!initialActiveShift) {
+        // No active shift - show modal to start shift
         setShowShiftModal(true)
       } else {
+        // Active shift exists - don't show modal
         setShowShiftModal(false)
       }
     }, 200)
-    
+
     return () => clearTimeout(timer)
   }, [initialActiveShift, currentUserRole])
 
@@ -326,21 +510,23 @@ export default function POSPageClient({
   const categoryNames = (initialCategories || []).map((cat: any) => cat.name)
   const categories = ['All', ...categoryNames, '🎁 Special Offers']
 
-  const specialOffers: Product[] = (initialSpecialOffers || []).map((offer: any) => ({
-    id: offer.id,
-    name: offer.name,
-    price: offer.promoPrice,
-    category: 'Special Offers',
-    currentStock: 999,
-    isOffer: true,
-    items: offer.items
-  }))
+  const specialOffers: Product[] = (initialSpecialOffers || [])
+    .filter((offer: any) => offer.offerType === 'FIXED_COMBO')
+    .map((offer: any) => ({
+      id: offer.id,
+      name: offer.name,
+      price: offer.promoPrice ?? 0,
+      category: 'Special Offers',
+      currentStock: 999,
+      isOffer: true,
+      items: offer.items
+    }))
 
   const products: Product[] = [
     ...(initialProducts || []).map((dbProduct: DbProduct) => ({
       id: dbProduct.id,
       name: dbProduct.name,
-      price: dbProduct.sellingPrice,
+      price: dbProduct.sellingPrice ?? 0,
       category: dbProduct.categoryRef?.name || dbProduct.category,
       imageUrl: dbProduct.imageUrl,
       currentStock: dbProduct.currentStock,
@@ -361,6 +547,13 @@ export default function POSPageClient({
     setFocusedProductIndex(-1)
   }, [selectedCategory, searchTerm])
 
+  // Auto-focus search bar on mount
+  useEffect(() => {
+    if (searchInputRef.current) {
+      searchInputRef.current.focus()
+    }
+  }, [])
+
   // Fetch today's orders on mount
   useEffect(() => {
     const fetchTodayOrders = async () => {
@@ -378,7 +571,7 @@ export default function POSPageClient({
               id: item.productId,
               name: item.productName || dbOrder.product.name,
               category: dbOrder.product.category,
-              price: dbOrder.product.sellingPrice
+              price: dbOrder.product.sellingPrice ?? 0
             } as any,
             quantity: item.quantity,
             note: item.note
@@ -421,10 +614,12 @@ export default function POSPageClient({
         activeElement.getAttribute('contenteditable') === 'true'
       )
 
-      // Lock screen shortcut (Ctrl+L or Alt+L) - works even in inputs
+      // Lock screen shortcut (Ctrl+L or Alt+L) - Admin only, works even in inputs
       if ((e.ctrlKey || e.altKey) && e.key.toLowerCase() === 'l') {
         e.preventDefault()
-        handleLockScreen()
+        if (currentUserRole === 'ADMIN') {
+          handleLockScreen()
+        }
         return
       }
 
@@ -432,7 +627,25 @@ export default function POSPageClient({
       if (e.key === 'F2') {
         e.preventDefault()
         searchInputRef.current?.focus()
+        searchInputRef.current?.select()
         setFocusedProductIndex(-1)
+        return
+      }
+
+      // CapsLock key to toggle between search and product grid
+      if (e.key === 'CapsLock') {
+        e.preventDefault()
+        if (isInputFocused && activeElement === searchInputRef.current) {
+          // Switch from search to product grid
+          searchInputRef.current?.blur()
+          setFocusedSection('productGrid')
+          setFocusedProductIndex(0)
+          productGridRef.current?.focus()
+        } else {
+          // Switch back to search
+          searchInputRef.current?.focus()
+          setFocusedProductIndex(-1)
+        }
         return
       }
 
@@ -479,39 +692,95 @@ export default function POSPageClient({
         }
       }
 
-      // Arrow key navigation for product grid
-      if (!showDiscountModal && !showPaymentModal && !showHoldOrdersModal && !showItemNoteModal && !showReceiptModal && !showLockPinModal && !showManagerPinModal) {
-        if (e.key === 'ArrowUp') {
+      // Tab key navigation for sections (removed - using sequential tabIndex instead)
+      // Arrow key navigation based on focused section
+      if (!showDiscountModal && !showPaymentModal && !showHoldOrdersModal && !showItemNoteModal && !showReceiptModal && !showLockPinModal && !showManagerPinModal && !isInputFocused) {
+        if (focusedSection === 'categories') {
+          // Category navigation with arrow keys
+          const allCategories = ['All', '🎁 Special Offers', ...categories.map((c: any) => c.name)]
+          if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            const newIndex = focusedCategoryIndex > 0 ? focusedCategoryIndex - 1 : allCategories.length - 1
+            setFocusedCategoryIndex(newIndex)
+            setSelectedCategory(allCategories[newIndex])
+            return
+          }
+          if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            const newIndex = focusedCategoryIndex < allCategories.length - 1 ? focusedCategoryIndex + 1 : 0
+            setFocusedCategoryIndex(newIndex)
+            setSelectedCategory(allCategories[newIndex])
+            return
+          }
+          // Enter to select category and move to product grid
+          if ((e.key === 'Enter' || e.key === 'NumpadEnter') && focusedCategoryIndex >= 0) {
+            e.preventDefault()
+            setFocusedSection('productGrid')
+            setFocusedProductIndex(0)
+            productGridRef.current?.focus()
+            return
+          }
+        }
+
+        if (focusedSection === 'productGrid') {
+          // Arrow key navigation for product grid (only when grid is focused)
+          if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            const gridColumns = window.innerWidth >= 1024 ? 3 : 2
+            const newIndex = focusedProductIndex >= gridColumns ? focusedProductIndex - gridColumns : 0
+            setFocusedProductIndex(newIndex)
+            return
+          }
+          if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            const gridColumns = window.innerWidth >= 1024 ? 3 : 2
+            const newIndex = focusedProductIndex + gridColumns < filteredProducts.length ? focusedProductIndex + gridColumns : filteredProducts.length - 1
+            setFocusedProductIndex(newIndex)
+            return
+          }
+          if (e.key === 'ArrowLeft') {
+            e.preventDefault()
+            const newIndex = focusedProductIndex > 0 ? focusedProductIndex - 1 : 0
+            setFocusedProductIndex(newIndex)
+            return
+          }
+          if (e.key === 'ArrowRight') {
+            e.preventDefault()
+            const newIndex = focusedProductIndex < filteredProducts.length - 1 ? focusedProductIndex + 1 : filteredProducts.length - 1
+            setFocusedProductIndex(newIndex)
+            return
+          }
+
+          // Enter key on focused product adds to cart
+          if ((e.key === 'Enter' || e.key === 'NumpadEnter') && focusedProductIndex >= 0 && focusedProductIndex < filteredProducts.length) {
+            e.preventDefault()
+            e.stopPropagation()
+            const focusedProduct = filteredProducts[focusedProductIndex]
+            if (focusedProduct && focusedProduct.currentStock > 0) {
+              addToCart(focusedProduct)
+            }
+            return
+          }
+        }
+
+        // PageUp/PageDown for cart navigation (to avoid conflict with product grid)
+        if (e.key === 'PageUp' && cart.length > 0) {
           e.preventDefault()
-          const gridColumns = window.innerWidth >= 1024 ? 3 : 2
-          const newIndex = focusedProductIndex >= gridColumns ? focusedProductIndex - gridColumns : 0
-          setFocusedProductIndex(newIndex)
+          const newIndex = focusedCartIndex > 0 ? focusedCartIndex - 1 : cart.length - 1
+          setFocusedCartIndex(newIndex)
           return
         }
-        if (e.key === 'ArrowDown') {
+        if (e.key === 'PageDown' && cart.length > 0) {
           e.preventDefault()
-          const gridColumns = window.innerWidth >= 1024 ? 3 : 2
-          const newIndex = focusedProductIndex + gridColumns < filteredProducts.length ? focusedProductIndex + gridColumns : filteredProducts.length - 1
-          setFocusedProductIndex(newIndex)
-          return
-        }
-        if (e.key === 'ArrowLeft') {
-          e.preventDefault()
-          const newIndex = focusedProductIndex > 0 ? focusedProductIndex - 1 : 0
-          setFocusedProductIndex(newIndex)
-          return
-        }
-        if (e.key === 'ArrowRight') {
-          e.preventDefault()
-          const newIndex = focusedProductIndex < filteredProducts.length - 1 ? focusedProductIndex + 1 : filteredProducts.length - 1
-          setFocusedProductIndex(newIndex)
+          const newIndex = focusedCartIndex < cart.length - 1 ? focusedCartIndex + 1 : 0
+          setFocusedCartIndex(newIndex)
           return
         }
       }
 
       // GLOBAL ENTER KEY BEHAVIOR - Checkout/Print Only
-      // Enter key exclusively triggers checkout/print, never adds products to cart
-      if ((e.key === 'Enter' || e.key === 'NumpadEnter') && !showLockPinModal && !showManagerPinModal && !isInputFocused) {
+      // Enter key exclusively triggers checkout/print when no product is focused
+      if ((e.key === 'Enter' || e.key === 'NumpadEnter') && !showLockPinModal && !showManagerPinModal && !isInputFocused && focusedProductIndex === -1) {
         e.preventDefault()
         e.stopPropagation()
         
@@ -577,7 +846,7 @@ export default function POSPageClient({
     }
     window.addEventListener('keydown', handleKeyPress)
     return () => window.removeEventListener('keydown', handleKeyPress)
-  }, [cart, discountSettings, orderType, showReceiptModal, showPaymentModal, showHoldOrdersModal, showItemNoteModal, filteredProducts, focusedProductIndex, showLockPinModal, showManagerPinModal])
+  }, [cart, discountSettings, orderType, showReceiptModal, showPaymentModal, showHoldOrdersModal, showItemNoteModal, filteredProducts, focusedProductIndex, showLockPinModal, showManagerPinModal, focusedSection, focusedCategoryIndex])
 
   const addToCart = (product: Product) => {
     setCart(prevCart => {
@@ -679,6 +948,13 @@ export default function POSPageClient({
 
   const calculateDiscount = () => {
     const subtotal = calculateSubtotal()
+    
+    // If there's an auto-applied discount from special offers, use it
+    if (autoAppliedDiscount) {
+      return subtotal * (autoAppliedDiscount.discountPercent / 100)
+    }
+    
+    // Otherwise use manual discount settings
     if (discountSettings.discountType === 'percentage') {
       return subtotal * (discountSettings.discountValue / 100)
     } else {
@@ -700,7 +976,10 @@ export default function POSPageClient({
       return comboItems
         .map((item: any) => {
           const freeLabel = item.isFree ? ' (Free)' : ''
-          return `${item.quantity}x${freeLabel}`
+          // Look up product name from initialProducts using productId
+          const product = initialProducts?.find((p: any) => p.id === item.productId)
+          const productName = product?.name || item.productName || item.name || item.product?.name || 'Unknown Item'
+          return `${item.quantity}x ${productName}${freeLabel}`
         })
         .join(', ')
     } catch {
@@ -781,7 +1060,7 @@ export default function POSPageClient({
                 id: item.productId,
                 name: item.productName || dbOrder.product.name,
                 category: dbOrder.product.category,
-                price: dbOrder.product.sellingPrice
+                price: dbOrder.product.sellingPrice ?? 0
               } as any,
               quantity: item.quantity,
               note: item.note
@@ -905,6 +1184,11 @@ export default function POSPageClient({
   }
 
   const handleLockScreen = () => {
+    // Security check: Only admins can lock the screen
+    if (currentUserRole !== 'ADMIN') {
+      console.warn('Lock screen attempted by non-admin user')
+      return
+    }
     setIsLocked(true)
     setShowLockPinModal(true)
   }
@@ -1022,44 +1306,18 @@ export default function POSPageClient({
       }} />
 
       <div className="flex h-[calc(100vh-48px)] w-full bg-slate-100 overflow-hidden">
-        {/* LEFT: Categories Sidebar */}
-        <div className="w-48 bg-white border-r border-slate-200 p-3 overflow-y-auto flex-shrink-0">
-          <div className="mb-3">
-            <input
-              ref={searchInputRef}
-              type="text"
-              placeholder="Search items... (F2)"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full h-8 px-2 py-1.5 text-xs rounded-lg border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
-            />
-          </div>
-
-          <div className="flex flex-col gap-2">
-            {categories.map(category => (
-              <button
-                key={category}
-                onClick={() => setSelectedCategory(category)}
-                className={`px-2 py-1.5 rounded-lg text-left text-xs font-medium transition-colors h-8 ${
-                  selectedCategory === category
-                    ? 'bg-primary text-white'
-                    : 'bg-slate-50 text-slate-700 hover:bg-slate-200'
-                }`}
-              >
-                {category}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {/* MIDDLE: Products & Recent Orders */}
         <div className="flex-1 flex flex-col h-full overflow-hidden p-4 space-y-4">
           {/* Top Section: Products Grid (Scrollable) */}
-          <div className="flex-1 overflow-y-auto pr-2">
+          <div 
+            ref={productGridRef}
+            tabIndex={1}
+            className="flex-1 overflow-y-auto pr-2 border-none outline-none"
+          >
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
               {filteredProducts.map((product: Product, index: number) => (
                 <button
-                  key={product.id}
+                  key={product.isOffer ? `offer-${product.id}` : `prod-${product.id}`}
                   onClick={() => addToCart(product)}
                   disabled={product.currentStock <= 0}
                   className={`bg-white rounded-xl shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 text-left border border-slate-200 flex flex-col overflow-hidden ${
@@ -1092,7 +1350,7 @@ export default function POSPageClient({
                   </div>
                   <div className="p-3 flex flex-col">
                     <h3 className="font-bold text-gray-800 text-sm mb-1 line-clamp-2 leading-tight">{product.name}</h3>
-                    <p className={`text-base font-bold ${product.isOffer ? 'text-orange-600' : 'text-amber-600'}`}>{currencySymbol} {product.price.toFixed(2)}</p>
+                    <p className={`text-base font-bold ${product.isOffer ? 'text-orange-600' : 'text-amber-600'}`}>{currencySymbol} {(product.price ?? 0).toFixed(2)}</p>
                     {!product.isOffer && (
                       <p className="text-xs text-gray-500 mt-1">Stock: {product.currentStock}</p>
                     )}
@@ -1131,14 +1389,14 @@ export default function POSPageClient({
                         </td>
                       </tr>
                     ) : (
-                      orders.map((order) => (
-                        <tr key={order.id} className="hover:bg-slate-50 transition-colors">
+                      orders.map((order, index) => (
+                        <tr key={`order-${order.id}-${index}`} className="hover:bg-slate-50 transition-colors">
                           <td className="px-3 py-2 text-xs text-slate-800 font-medium whitespace-nowrap">{order.id}</td>
                           <td className="px-3 py-2 text-xs text-slate-600 max-w-xs truncate" title={order.items}>
                             {order.items}
                           </td>
                           <td className="px-3 py-2 text-xs text-slate-600 text-center">{order.qty}</td>
-                          <td className="px-3 py-2 text-xs text-slate-800 font-semibold">{currencySymbol} {order.totalAmount.toFixed(2)}</td>
+                          <td className="px-3 py-2 text-xs text-slate-800 font-semibold">{currencySymbol} {(order.totalAmount ?? 0).toFixed(2)}</td>
                           <td className="px-3 py-2 text-xs text-slate-600 capitalize">{order.orderType}</td>
                           <td className="px-3 py-2">
                             <div className="flex gap-1">
@@ -1175,14 +1433,57 @@ export default function POSPageClient({
           </div>
         </div>
 
+        {/* LEFT: Categories Sidebar */}
+        <div className="w-48 bg-white border-r border-slate-200 p-3 overflow-y-auto flex-shrink-0">
+          <div className="mb-3">
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Search items... (F2)"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              tabIndex={2}
+              className="w-full h-8 px-2 py-1.5 text-xs rounded-lg border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+            />
+          </div>
+
+          <div 
+            ref={categoriesRef}
+            className="flex flex-col gap-2"
+          >
+            {categories.map((category, index) => (
+              <button
+                key={`category-${category}`}
+                onClick={() => setSelectedCategory(category)}
+                tabIndex={3 + index}
+                className={`px-2 py-1.5 rounded-lg text-left text-xs font-medium transition-colors h-8 ${
+                  selectedCategory === category
+                    ? 'bg-primary text-white'
+                    : 'bg-slate-50 text-slate-700 hover:bg-slate-200'
+                } ${
+                  focusedSection === 'categories' && focusedCategoryIndex === index
+                    ? 'ring-2 ring-primary ring-offset-2'
+                    : ''
+                }`}
+              >
+                {category}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* RIGHT: Cart & Checkout Section (Fixed Height Stack) */}
-        <div className="w-80 lg:w-96 bg-white border-l border-slate-200 flex flex-col h-full p-4 flex-shrink-0">
+        <div 
+          ref={cartControlsRef}
+          className="w-80 lg:w-96 bg-white border-l border-slate-200 flex flex-col h-full p-4 flex-shrink-0"
+        >
           {/* 1. Header & Order Type (Fixed) */}
           <div className="mb-3 flex-shrink-0">
             <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Order Type</h2>
             <div className="flex gap-2">
               <button
                 onClick={() => setOrderType('takeaway')}
+                tabIndex={10}
                 className={`flex-1 h-8 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                   orderType === 'takeaway' ? 'bg-primary text-white' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
                 }`}
@@ -1191,6 +1492,7 @@ export default function POSPageClient({
               </button>
               <button
                 onClick={() => setOrderType('dine-in')}
+                tabIndex={11}
                 className={`flex-1 h-8 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                   orderType === 'dine-in' ? 'bg-primary text-white' : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
                 }`}
@@ -1207,13 +1509,25 @@ export default function POSPageClient({
                 🛒 Cart is empty
               </div>
             ) : (
-              cart.map((item: CartItem) => (
-                <div key={item.product.id} className={`bg-slate-50 rounded-lg p-2 border ${
+              cart.map((item: CartItem, index: number) => (
+                <div key={item.product.isOffer ? `cart-offer-${item.product.id}-${index}` : `cart-prod-${item.product.id}-${index}`} className={`bg-slate-50 rounded-lg p-2 border ${
                   item.quantity > item.product.currentStock ? 'border-red-300 bg-red-50' : 'border-slate-100'
                 }`}>
                   <div className="flex justify-between items-start mb-1">
                     <div className="flex-1">
-                      <h3 className="text-xs font-semibold text-slate-800 line-clamp-1">{item.product.name}</h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-xs font-semibold text-slate-800 line-clamp-1">{item.product.name}</h3>
+                        {item.product.items?.includes('[PROMO FREE ITEM') && (
+                          <span className="px-1.5 py-0.5 bg-green-100 text-green-700 text-[9px] font-bold rounded-full uppercase tracking-wide">
+                            FREE
+                          </span>
+                        )}
+                        {item.product.items?.includes('[CART THRESHOLD FREE') && (
+                          <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[9px] font-bold rounded-full uppercase tracking-wide">
+                            PROMO
+                          </span>
+                        )}
+                      </div>
                       {item.product.isOffer && item.product.items && (
                         <p className="text-[10px] text-slate-500 mt-0.5">
                           Includes: {getItemsBreakdown(item.product.items)}
@@ -1224,11 +1538,11 @@ export default function POSPageClient({
                       )}
                     </div>
                     <span className="text-xs font-bold text-slate-800 whitespace-nowrap ml-2">
-                      {currencySymbol} {(item.product.price * item.quantity).toFixed(2)}
+                      {currencySymbol} {((item.product.price ?? 0) * item.quantity).toFixed(2)}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="text-[10px] text-slate-500">{currencySymbol} {item.product.price.toFixed(2)} each</span>
+                    <span className="text-[10px] text-slate-500">{currencySymbol} {(item.product.price ?? 0).toFixed(2)} each</span>
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => updateQuantity(item.product.id, -1)}
@@ -1268,25 +1582,30 @@ export default function POSPageClient({
             <div className="flex gap-2">
               <button
                 onClick={() => setShowDiscountModal(true)}
+                tabIndex={12}
                 className="flex-1 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors font-medium text-xs h-8"
               >
                 % Discount (F4)
               </button>
               <button
                 onClick={handleHoldOrder}
+                tabIndex={13}
                 className="flex-1 py-1.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors font-medium text-xs h-8"
               >
                 Hold Order
               </button>
             </div>
 
-            {/* Lock Screen Button */}
-            <button
-              onClick={handleLockScreen}
-              className="w-full py-1.5 bg-slate-100 text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-200 transition-colors font-medium text-xs h-8 flex items-center justify-center gap-2"
-            >
-              🔒 Lock Screen
-            </button>
+            {/* Lock Screen Button - Admin Only */}
+            {currentUserRole === 'ADMIN' && (
+              <button
+                onClick={handleLockScreen}
+                tabIndex={14}
+                className="w-full py-1.5 bg-slate-100 text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-200 transition-colors font-medium text-xs h-8 flex items-center justify-center gap-2"
+              >
+                🔒 Lock Screen
+              </button>
+            )}
 
             {/* Recall Orders Badge */}
             {heldOrders.length > 0 && (
@@ -1304,23 +1623,31 @@ export default function POSPageClient({
               <div className="space-y-1 mb-2 text-xs">
                 <div className="flex justify-between text-gray-600">
                   <span>Subtotal</span>
-                  <span>{currencySymbol} {calculateSubtotal().toFixed(2)}</span>
+                  <span>{currencySymbol} {(calculateSubtotal() ?? 0).toFixed(2)}</span>
                 </div>
                 {calculateDiscount() > 0 && (
                   <div className="flex justify-between text-green-600 font-medium">
-                    <span>Discount ({discountSettings.discountType === 'percentage' ? `${discountSettings.discountValue}%` : 'Flat'})</span>
-                    <span>- {currencySymbol} {calculateDiscount().toFixed(2)}</span>
+                    <span>
+                      Discount (
+                      {autoAppliedDiscount 
+                        ? `${autoAppliedDiscount.offerName} - ${autoAppliedDiscount.discountPercent}%`
+                        : discountSettings.discountType === 'percentage' 
+                          ? `${discountSettings.discountValue}%` 
+                          : 'Flat'
+                      })
+                    </span>
+                    <span>- {currencySymbol} {(calculateDiscount() ?? 0).toFixed(2)}</span>
                   </div>
                 )}
                 {discountSettings.extraCharges.map((charge, index) => (
-                  <div key={index} className="flex justify-between text-gray-600">
+                  <div key={`charge-${index}`} className="flex justify-between text-gray-600">
                     <span>{charge.label || 'Extra Charge'}</span>
-                    <span>{currencySymbol} {charge.amount.toFixed(2)}</span>
+                    <span>{currencySymbol} {(charge.amount ?? 0).toFixed(2)}</span>
                   </div>
                 ))}
                 <div className="flex justify-between text-xs font-bold text-gray-800 pt-1 border-t border-gray-200">
                   <span>Grand Total</span>
-                  <span className="text-amber-600">{currencySymbol} {calculateGrandTotal().toFixed(2)}</span>
+                  <span className="text-amber-600">{currencySymbol} {(calculateGrandTotal() ?? 0).toFixed(2)}</span>
                 </div>
               </div>
 
@@ -1329,12 +1656,14 @@ export default function POSPageClient({
                 <div className="flex gap-2">
                   <button
                     onClick={clearCart}
+                    tabIndex={15}
                     className="flex-1 py-1.5 text-xs bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium transition-colors h-8"
                   >
                     Clear (Esc)
                   </button>
                   <button
                     onClick={handlePlaceOrder}
+                    tabIndex={16}
                     className="flex-[2] py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 font-bold transition-colors h-8"
                   >
                     Checkout (Enter)
@@ -1350,7 +1679,7 @@ export default function POSPageClient({
       {/* Payment Modal */}
       {showPaymentModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl p-4 w-full max-w-md">
+          <div ref={paymentModalRef} className="bg-white rounded-lg shadow-xl p-4 w-full max-w-md">
             <h2 className="text-sm font-bold text-gray-800 mb-3">Select Payment Method</h2>
             
             {/* Payment Method Selector */}
@@ -1396,7 +1725,7 @@ export default function POSPageClient({
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Cash Received</label>
                   <input
-                    ref={cashReceivedRef}
+                    ref={cashReceivedInputRef}
                     type="number"
                     value={cashReceived}
                     onChange={(e) => setCashReceived(parseFloat(e.target.value) || 0)}
@@ -1424,7 +1753,7 @@ export default function POSPageClient({
                 <div className="grid grid-cols-5 gap-2">
                   {[100, 500, 1000, 5000, 0].map((amount, index) => (
                     <button
-                      key={amount}
+                      key={`quickcash-${amount}-${index}`}
                       ref={(el) => { quickCashButtonsRef.current[index] = el }}
                       onClick={() => setQuickCashAmount(amount)}
                       onKeyDown={(e) => {
@@ -1460,7 +1789,7 @@ export default function POSPageClient({
                   <div className="flex justify-between text-sm text-gray-600 mb-1">
                     <span>Change Due:</span>
                     <span className={`font-bold ${calculateChange() >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      {currencySymbol} {calculateChange().toFixed(2)}
+                      {currencySymbol} {(calculateChange() ?? 0).toFixed(2)}
                     </span>
                   </div>
                 </div>
@@ -1582,7 +1911,7 @@ export default function POSPageClient({
       {/* Discount Modal */}
       {showDiscountModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl p-4 w-full max-w-md">
+          <div ref={discountModalRef} className="bg-white rounded-lg shadow-xl p-4 w-full max-w-md">
             <h2 className="text-sm font-bold text-gray-800 mb-3">Apply Discount</h2>
             
             <div className="space-y-4">
@@ -1613,6 +1942,7 @@ export default function POSPageClient({
                   {discountSettings.discountType === 'percentage' ? 'Discount Percentage' : 'Discount Amount'}
                 </label>
                 <input
+                  ref={discountValueInputRef}
                   type="number"
                   value={discountSettings.discountValue}
                   onChange={(e) => setDiscountSettings(prev => ({ ...prev, discountValue: parseFloat(e.target.value) || 0 }))}
@@ -1638,7 +1968,7 @@ export default function POSPageClient({
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Extra Charges</label>
                 {discountSettings.extraCharges.map((charge, index) => (
-                  <div key={index} className="flex gap-2 mb-2">
+                  <div key={`modal-charge-${index}`} className="flex gap-2 mb-2">
                     <input
                       type="text"
                       value={charge.label}
@@ -1713,8 +2043,8 @@ export default function POSPageClient({
               <p className="text-sm text-gray-500 text-center py-4">No held orders</p>
             ) : (
               <div className="space-y-2">
-                {heldOrders.map((heldOrder) => (
-                  <div key={heldOrder.id} className="bg-gray-50 rounded-lg p-3 border">
+                {heldOrders.map((heldOrder, index) => (
+                  <div key={`held-order-${heldOrder.id}-${index}`} className="bg-gray-50 rounded-lg p-3 border">
                     <div className="flex justify-between items-start mb-2">
                       <div>
                         <p className="text-xs font-semibold text-gray-800">{heldOrder.id}</p>
@@ -1723,7 +2053,7 @@ export default function POSPageClient({
                         </p>
                       </div>
                       <p className="text-xs font-bold text-gray-800">
-                        {currencySymbol} {heldOrder.cart.reduce((sum, item) => sum + (item.product.price * item.quantity), 0).toFixed(2)}
+                        {currencySymbol} {heldOrder.cart.reduce((sum, item) => sum + ((item.product.price ?? 0) * item.quantity), 0).toFixed(2)}
                       </p>
                     </div>
                     <div className="flex gap-2">
@@ -1874,11 +2204,11 @@ export default function POSPageClient({
             {/* Items Section with Unit Price Breakdown */}
             <div className="mb-2">
               {lastOrder.cartSnapshot.map((item, index) => (
-                <div key={index} className="mb-2">
+                <div key={`receipt-item-${item.product.id}-${index}`} className="mb-2">
                   <div className="text-xs font-semibold">{item.product.name}</div>
                   <div className="flex justify-between text-xs">
-                    <span>{item.quantity} x {currencySymbol}{item.product.price.toFixed(2)}</span>
-                    <span className="font-semibold">{currencySymbol} {(item.product.price * item.quantity).toFixed(2)}</span>
+                    <span>{item.quantity} x {currencySymbol}{(item.product.price ?? 0).toFixed(2)}</span>
+                    <span className="font-semibold">{currencySymbol} {((item.product.price ?? 0) * item.quantity).toFixed(2)}</span>
                   </div>
                   {item.note && <div className="text-xs text-gray-500 italic">Note: {item.note}</div>}
                 </div>
@@ -1889,23 +2219,23 @@ export default function POSPageClient({
             <div className="border-t border-b border-dashed py-2 mb-2">
               <div className="flex justify-between text-xs">
                 <span>SUBTOTAL:</span>
-                <span>{currencySymbol} {lastOrder.subtotal.toFixed(2)}</span>
+                <span>{currencySymbol} {(lastOrder.subtotal ?? 0).toFixed(2)}</span>
               </div>
              {Boolean(lastOrder?.discount && Number(lastOrder.discount) > 0) ? (
                 <div className="flex justify-between text-xs text-green-600">
                   <span>DISCOUNT ({lastOrder.discountType}):</span>
-                  <span>- {currencySymbol} {Number(lastOrder.discount).toFixed(2)}</span>
+                  <span>- {currencySymbol} {(Number(lastOrder.discount) ?? 0).toFixed(2)}</span>
                 </div>
               ) : null}
               {lastOrder.extraCharges && lastOrder.extraCharges.filter(charge => charge.amount > 0).map((charge, index) => (
-                <div key={index} className="flex justify-between text-xs">
+                <div key={`receipt-charge-${index}`} className="flex justify-between text-xs">
                   <span className="uppercase">{charge.label}:</span>
-                  <span>{currencySymbol} {charge.amount.toFixed(2)}</span>
+                  <span>{currencySymbol} {(charge.amount ?? 0).toFixed(2)}</span>
                 </div>
  ))}
               <div className="flex justify-between text-sm font-bold mt-1">
                 <span>TOTAL:</span>
-                <span>{currencySymbol} {lastOrder.totalAmount.toFixed(2)}</span>
+                <span>{currencySymbol} {(lastOrder.totalAmount ?? 0).toFixed(2)}</span>
               </div>
             </div>
 
@@ -1919,11 +2249,11 @@ export default function POSPageClient({
                 <>
                   <div className="flex justify-between text-xs">
                     <span>CASH PAID:</span>
-                    <span>{currencySymbol} {lastOrder.cashReceived.toFixed(2)}</span>
+                    <span>{currencySymbol} {(lastOrder.cashReceived ?? 0).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between text-xs">
                     <span>CHANGE RETURNED:</span>
-                    <span>{currencySymbol} {(lastOrder.cashReceived - lastOrder.totalAmount).toFixed(2)}</span>
+                    <span>{currencySymbol} {((lastOrder.cashReceived ?? 0) - (lastOrder.totalAmount ?? 0)).toFixed(2)}</span>
                   </div>
                 </>
               )}
@@ -1964,8 +2294,8 @@ export default function POSPageClient({
             <h2 className="text-sm font-bold text-gray-800 mb-3">🎁 Special Offer Available!</h2>
             
             <div className="space-y-2">
-              {eligibleOffers.map((offer) => (
-                <div key={offer.id} className="bg-amber-50 rounded-lg p-3 border border-amber-200">
+              {eligibleOffers.map((offer, index) => (
+                <div key={`eligible-offer-${offer.id}-${index}`} className="bg-amber-50 rounded-lg p-3 border border-amber-200">
                   <p className="text-sm font-semibold text-gray-800">{offer.name}</p>
                   <p className="text-xs text-gray-600 mt-1">{offer.description}</p>
                   <button

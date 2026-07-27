@@ -2,7 +2,7 @@ import { getStoreSettings } from '@/actions/store'
 import { getProducts } from '@/actions/product'
 import { getSpecialOffers } from '@/actions/specialOffer'
 import { getCategories } from '@/actions/category'
-import { getSession } from '@/actions/auth'
+import { getSession } from '@/lib/session'
 import { getActiveShift, getLastShift } from '@/actions/shift'
 import POSPageClient from '@/components/POSPageClient'
 
@@ -21,18 +21,18 @@ export default async function POSPage(props: PageProps) {
   const products = await getProducts()
   const specialOffers = await getSpecialOffers()
   const categories = await getCategories()
-  
+
   // Check for active shift for cashiers
   let activeShift = null
   let lastShift = null
-  
+
   if (session?.role === 'CASHIER') {
     activeShift = await getActiveShift(session.userId)
     if (!activeShift) {
       lastShift = await getLastShift(session.userId)
     }
   }
-  
+
   // Serialize data to avoid Next.js serialization errors
   const plainSettings = JSON.parse(JSON.stringify(storeSettings))
   const plainProducts = JSON.parse(JSON.stringify(products))
@@ -40,11 +40,11 @@ export default async function POSPage(props: PageProps) {
   const plainCategories = JSON.parse(JSON.stringify(categories))
   const plainActiveShift = activeShift ? JSON.parse(JSON.stringify(activeShift)) : null
   const plainLastShift = lastShift ? JSON.parse(JSON.stringify(lastShift)) : null
-  
-  return <POSPageClient 
-    initialSettings={plainSettings} 
-    initialProducts={plainProducts} 
-    initialSpecialOffers={plainSpecialOffers} 
+
+  return <POSPageClient
+    initialSettings={plainSettings}
+    initialProducts={plainProducts}
+    initialSpecialOffers={plainSpecialOffers}
     initialCategories={plainCategories}
     initialActiveShift={plainActiveShift}
     initialLastShift={plainLastShift}

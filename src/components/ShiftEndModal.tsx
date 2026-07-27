@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import { useFocusTrap, useAutoFocus } from '@/hooks/useFocusTrap'
 
 interface ShiftEndModalProps {
   isOpen: boolean
@@ -13,9 +14,9 @@ interface ShiftEndModalProps {
   onClose: () => void
 }
 
-export default function ShiftEndModal({ 
-  isOpen, 
-  cashierName, 
+export default function ShiftEndModal({
+  isOpen,
+  cashierName,
   shiftStartTime,
   openingBalance,
   totalCashSales,
@@ -23,14 +24,22 @@ export default function ShiftEndModal({
   onClose
 }: ShiftEndModalProps) {
   const router = useRouter()
-  
+  const modalRef = useRef<HTMLDivElement>(null)
+  const closingCashInputRef = useRef<HTMLInputElement>(null)
+
   // Expected cash = opening balance + total cash sales
   const expectedCash = openingBalance + totalCashSales
-  
+
   const [closingCash, setClosingCash] = useState(expectedCash)
   const [notes, setNotes] = useState('')
   const [currentTime, setCurrentTime] = useState('')
   const [shiftDuration, setShiftDuration] = useState('')
+
+  // Enable focus trap when modal is open
+  useFocusTrap(isOpen, modalRef)
+
+  // Auto-focus closing cash input when modal opens
+  useAutoFocus(isOpen, closingCashInputRef)
 
   useEffect(() => {
     // Update current time every second (Sri Lanka Standard Time)
@@ -144,11 +153,12 @@ export default function ShiftEndModal({
   })
 
   return (
-    <div 
+    <div
       className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
       onClick={handleBackdropClick}
     >
-      <div 
+      <div
+        ref={modalRef}
         className="bg-white rounded-lg shadow-xl w-full max-w-md"
         onClick={(e) => e.stopPropagation()}
       >
@@ -216,6 +226,7 @@ export default function ShiftEndModal({
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-medium">Rs.</span>
               <input
+                ref={closingCashInputRef}
                 type="number"
                 step="0.01"
                 min="0"
@@ -228,15 +239,38 @@ export default function ShiftEndModal({
             <p className="mt-1 text-xs text-gray-500">
               Actual cash in drawer (count and enter the final amount)
             </p>
+
+            {/* Real-time Variance Indicator */}
+            <div className={`mt-2 p-2 rounded-md border text-xs font-medium ${
+              variance === 0
+                ? 'bg-green-50 border-green-200 text-green-800'
+                : variance > 0
+                ? 'bg-orange-50 border-orange-200 text-orange-800'
+                : 'bg-red-50 border-red-200 text-red-800'
+            }`}>
+              {variance === 0 ? (
+                <span className="flex items-center gap-1">
+                  <span>✓</span> Matched / Balanced (Rs. 0.00)
+                </span>
+              ) : variance > 0 ? (
+                <span className="flex items-center gap-1">
+                  <span>⚠️</span> Excess of Rs. {variance.toFixed(2)}
+                </span>
+              ) : (
+                <span className="flex items-center gap-1">
+                  <span>⚠️</span> Shortage of Rs. {Math.abs(variance).toFixed(2)}
+                </span>
+              )}
+            </div>
           </div>
 
-          {/* Variance Warning */}
+          {/* Detailed Variance Warning */}
           {hasVariance && (
-            <div className={`p-3 rounded-lg border ${variance > 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-              <p className={`text-xs font-semibold ${variance > 0 ? 'text-green-800' : 'text-red-800'}`}>
+            <div className={`p-3 rounded-lg border ${variance > 0 ? 'bg-orange-50 border-orange-200' : 'bg-red-50 border-red-200'}`}>
+              <p className={`text-xs font-semibold ${variance > 0 ? 'text-orange-800' : 'text-red-800'}`}>
                 {variance > 0 ? '💰 Surplus Detected' : '⚠️ Shortage Detected'}
               </p>
-              <p className={`text-xs mt-1 ${variance > 0 ? 'text-green-700' : 'text-red-700'}`}>
+              <p className={`text-xs mt-1 ${variance > 0 ? 'text-orange-700' : 'text-red-700'}`}>
                 {variance > 0 ? 'Cash exceeds expected by' : 'Cash is short by'} Rs. {Math.abs(variance).toFixed(2)}
               </p>
             </div>

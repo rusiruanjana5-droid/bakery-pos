@@ -5,6 +5,14 @@ import Header from '@/components/Header'
 import ThemeProvider from '@/components/ThemeProvider'
 import { getSession } from '@/lib/session'
 import { getStoreSettings } from '@/actions/store'
+import { initializeBackupSystem } from '@/lib/backup-init'
+import { initializeSQLiteDatabase } from '@/lib/sqlite-init'
+
+// Initialize backup system on server startup
+initializeBackupSystem()
+
+// Initialize SQLite database for offline operations
+initializeSQLiteDatabase()
 
 export const metadata: Metadata = {
   title: 'Bakery POS',
@@ -28,7 +36,7 @@ export default async function RootLayout({
 
   return (
     <html lang="en" className="h-screen overflow-hidden">
-      <body className="h-screen overflow-hidden bg-slate-50">
+      <body className="h-screen overflow-hidden bg-slate-50" suppressHydrationWarning>
         <ThemeProvider settings={plainStoreSettings} />
         {children}
       </body>

@@ -14,6 +14,8 @@ export async function createCategory(formData: FormData) {
   const activeHoursEnd = formData.get('activeHoursEnd') as string
   const displayOrderStr = formData.get('displayOrder') as string
   const displayOrder = displayOrderStr ? parseInt(displayOrderStr) : 0
+  const parentIdStr = formData.get('parentId') as string
+  const parentId = parentIdStr ? parseInt(parentIdStr) : null
 
   // Get max display order if not provided
   const maxOrder = displayOrder || await prisma.category.findFirst({
@@ -21,17 +23,23 @@ export async function createCategory(formData: FormData) {
     select: { displayOrder: true }
   }).then(cat => cat ? cat.displayOrder + 1 : 0)
 
+  const data: any = {
+    name,
+    description: description || null,
+    color: color || null,
+    imageUrl: imageUrl || null,
+    taxRate,
+    activeHoursStart: activeHoursStart || null,
+    activeHoursEnd: activeHoursEnd || null,
+    displayOrder: maxOrder
+  }
+
+  if (parentId !== null) {
+    data.parentId = parentId
+  }
+
   await prisma.category.create({
-    data: {
-      name,
-      description: description || null,
-      color: color || null,
-      imageUrl: imageUrl || null,
-      taxRate,
-      activeHoursStart: activeHoursStart || null,
-      activeHoursEnd: activeHoursEnd || null,
-      displayOrder: maxOrder
-    }
+    data
   })
   revalidatePath('/admin/categories')
   revalidatePath('/products')
@@ -51,6 +59,8 @@ export async function updateCategory(formData: FormData) {
   const activeHoursEnd = formData.get('activeHoursEnd') as string
   const displayOrderStr = formData.get('displayOrder') as string
   const displayOrder = displayOrderStr ? parseInt(displayOrderStr) : null
+  const parentIdStr = formData.get('parentId') as string
+  const parentId = parentIdStr ? parseInt(parentIdStr) : null
 
   const data: any = {
     name,
@@ -64,6 +74,7 @@ export async function updateCategory(formData: FormData) {
   if (activeHoursStart !== undefined) data.activeHoursStart = activeHoursStart || null
   if (activeHoursEnd !== undefined) data.activeHoursEnd = activeHoursEnd || null
   if (displayOrder !== null) data.displayOrder = displayOrder
+  if (parentId !== undefined) data.parentId = parentId
 
   await prisma.category.update({
     where: { id },
@@ -165,9 +176,32 @@ export async function getCategoryAnalytics(categoryId: number) {
 export async function getCategories() {
   return prisma.category.findMany({
     where: {
-      isActive: true
+      isActive: true,
+      parentId: null // Only top-level categories
     },
     include: {
+      children: {
+        where: {
+          isActive: true
+        },
+        include: {
+          children: {
+            where: {
+              isActive: true
+            },
+            include: {
+              children: {
+                where: {
+                  isActive: true
+                }
+              }
+            }
+          }
+        },
+        orderBy: {
+          displayOrder: 'asc'
+        }
+      },
       subCategories: {
         where: {
           isActive: true
@@ -185,7 +219,19 @@ export async function getCategories() {
 
 export async function getAllCategories() {
   return prisma.category.findMany({
+    where: {
+      parentId: null // Only top-level categories
+    },
     include: {
+      children: {
+        include: {
+          children: {
+            include: {
+              children: true
+            }
+          }
+        }
+      },
       subCategories: {
         orderBy: {
           displayOrder: 'asc'
@@ -196,6 +242,13 @@ export async function getAllCategories() {
       displayOrder: 'asc'
     }
   })
+}
+
+export async function getCategoryTree() {
+  const categories = await prisma.category.findMany({
+    orderBy: { displayOrder: 'asc' }
+  })
+  return categories
 }
 
 export async function createSubCategory(formData: FormData) {

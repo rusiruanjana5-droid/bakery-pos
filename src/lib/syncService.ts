@@ -1,7 +1,16 @@
-import prisma from '@/db'
+// Removed Prisma import - now using API routes for database operations
 
-// Cloud MySQL client (existing)
-const cloudPrisma = prisma
+// Helper function to construct absolute URLs for fetch calls
+const getAbsoluteUrl = (path: string): string => {
+  if (typeof window !== 'undefined') {
+    // Client-side: use relative URL (browser handles base URL)
+    return path
+  }
+  
+  // Server-side: construct absolute URL
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3001'
+  return `${baseUrl}${path}`
+}
 
 export interface SyncStatus {
   isOnline: boolean
@@ -96,8 +105,12 @@ class SyncService {
 
     // Internet is available, now check cloud database connectivity
     try {
-      await cloudPrisma.$queryRaw`SELECT 1`
-      this.isDbConnected = true
+      const response = await fetch(getAbsoluteUrl('/api/sync/connectivity'), {
+        method: 'GET',
+        cache: 'no-cache'
+      })
+      const result = await response.json()
+      this.isDbConnected = result.connected
       
       // If we just came online with DB access, trigger sync
       if (this.isOnline && this.isDbConnected) {
@@ -240,43 +253,40 @@ class SyncService {
 
   private async syncOrder(operation: string, payload: any): Promise<void> {
     // Implement order sync logic based on operation (CREATE, UPDATE, DELETE)
-    if (operation === 'CREATE') {
-      await cloudPrisma.order.create({ data: payload })
-    } else if (operation === 'UPDATE') {
-      await cloudPrisma.order.update({ 
-        where: { id: payload.id },
-        data: payload 
-      })
-    } else if (operation === 'DELETE') {
-      await cloudPrisma.order.delete({ where: { id: payload.id } })
+    const response = await fetch(getAbsoluteUrl('/api/sync/order'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operation, payload })
+    })
+    
+    if (!response.ok) {
+      throw new Error('Failed to sync order')
     }
   }
 
   private async syncProduct(operation: string, payload: any): Promise<void> {
     // Implement product sync logic
-    if (operation === 'CREATE') {
-      await cloudPrisma.product.create({ data: payload })
-    } else if (operation === 'UPDATE') {
-      await cloudPrisma.product.update({ 
-        where: { id: payload.id },
-        data: payload 
-      })
-    } else if (operation === 'DELETE') {
-      await cloudPrisma.product.delete({ where: { id: payload.id } })
+    const response = await fetch(getAbsoluteUrl('/api/sync/product'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operation, payload })
+    })
+    
+    if (!response.ok) {
+      throw new Error('Failed to sync product')
     }
   }
 
   private async syncGRN(operation: string, payload: any): Promise<void> {
     // Implement GRN sync logic
-    if (operation === 'CREATE') {
-      await cloudPrisma.gRN.create({ data: payload })
-    } else if (operation === 'UPDATE') {
-      await cloudPrisma.gRN.update({ 
-        where: { id: payload.id },
-        data: payload 
-      })
-    } else if (operation === 'DELETE') {
-      await cloudPrisma.gRN.delete({ where: { id: payload.id } })
+    const response = await fetch(getAbsoluteUrl('/api/sync/grn'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ operation, payload })
+    })
+    
+    if (!response.ok) {
+      throw new Error('Failed to sync GRN')
     }
   }
 

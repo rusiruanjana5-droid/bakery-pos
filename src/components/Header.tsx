@@ -76,13 +76,26 @@ export default function Header({ session, storeSettings }: HeaderProps) {
 
     setActiveShift(active)
     setLastShift(last)
+
+    // If there's an active shift, fetch real-time summary for accurate cash sales
+    if (active) {
+      const { getShiftSummary } = await import('@/actions/shift')
+      const summary = await getShiftSummary(active.id)
+      if (summary) {
+        setActiveShift({ ...active, ...summary })
+      }
+    }
   }
 
   const handleSwitchUser = async (pin: string) => {
-    const result = await switchUserByPin(pin)
+    // Pass current user and shift info for pause/resume logic
+    const currentUserId = session?.userId
+    const currentShiftId = activeShift?.id
+
+    const result = await switchUserByPin(pin, currentUserId, currentShiftId)
     if (result.success) {
       setShowSwitchUserModal(false)
-      
+
       // Redirect based on user role
       if (result.user) {
         const userRole = result.user.role
@@ -90,7 +103,7 @@ export default function Header({ session, storeSettings }: HeaderProps) {
           // Redirect to admin dashboard for admin/manager roles
           router.push('/')
         } else if (userRole === 'CASHIER') {
-          // Keep cashiers on POS screen
+          // Keep cashiers on POS screen - refresh to get new shift data
           router.push('/pos')
         } else {
           // Other roles go to dashboard

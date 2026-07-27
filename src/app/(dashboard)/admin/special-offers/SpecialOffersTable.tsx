@@ -29,6 +29,16 @@ interface SpecialOffer {
   triggerProducts: string | null
   triggerMinAmount: number | null
   rewardItems: string | null
+  // Buy X Get Y fields
+  appliesToScope: string | null
+  minQty: number | null
+  minSpend: number | null
+  rewardProductId: number | null
+  rewardQty: number | null
+  rewardDiscountPercent: number | null
+  // Cart Threshold fields
+  minCartAmount: number | null
+  rewardType: string | null
   createdAt: Date
   updatedAt: Date
 }
@@ -42,9 +52,23 @@ function getOfferStatus(offer: SpecialOffer): string {
   if (!offer.isActive) return 'Disabled'
   
   const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   
-  if (offer.startDate && new Date(offer.startDate) > now) return 'Scheduled'
-  if (offer.endDate && new Date(offer.endDate) < now) return 'Expired'
+  if (offer.startDate) {
+    const startDate = new Date(offer.startDate)
+    const startDateOnly = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate())
+    
+    // If start date is in the future, it's Scheduled
+    if (startDateOnly > today) return 'Scheduled'
+  }
+  
+  if (offer.endDate) {
+    const endDate = new Date(offer.endDate)
+    const endDateOnly = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate())
+    
+    // If end date is in the past, it's Expired
+    if (endDateOnly < today) return 'Expired'
+  }
   
   // Check time window
   if (offer.startTime && offer.endTime) {
@@ -213,6 +237,28 @@ export default function SpecialOffersTable({ specialOffers, products }: SpecialO
   }
 
   const getTriggerDescription = (offer: SpecialOffer) => {
+    if (offer.offerType === 'BUY_X_GET_Y') {
+      switch (offer.appliesToScope) {
+        case 'ALL_ITEMS':
+          return `Buy ${offer.minQty || 1} of any items`
+        case 'SPECIFIC_ITEMS':
+          try {
+            const productIds = JSON.parse(offer.triggerProducts || '[]')
+            const productNames = productIds
+              .map((id: number) => products.find(p => p.id === id)?.name)
+              .filter(Boolean)
+              .join(', ')
+            return productNames || 'No products selected'
+          } catch {
+            return 'Invalid trigger products'
+          }
+        case 'CATEGORY':
+          return 'Specific Category'
+        default:
+          return 'N/A'
+      }
+    }
+    
     if (offer.offerType !== 'CART_TRIGGER') return 'N/A'
     
     switch (offer.triggerType) {
@@ -236,6 +282,25 @@ export default function SpecialOffersTable({ specialOffers, products }: SpecialO
       default:
         return 'N/A'
     }
+  }
+
+  const getRewardDescription = (offer: SpecialOffer) => {
+    if (offer.offerType === 'BUY_X_GET_Y') {
+      const product = products.find(p => p.id === offer.rewardProductId)
+      if (!product) return 'No reward product selected'
+      
+      const discountPercent = offer.rewardDiscountPercent || 100
+      const discountLabel = discountPercent === 100 ? 'FREE' : `${discountPercent}% off`
+      return `${product.name} x${offer.rewardQty || 1} (${discountLabel})`
+    }
+    
+    if (offer.offerType === 'CART_THRESHOLD') {
+      const product = products.find(p => p.id === offer.rewardProductId)
+      if (!product) return 'No reward product selected'
+      return `${product.name} x${offer.rewardQty || 1} (FREE)`
+    }
+    
+    return 'N/A'
   }
 
   return (
@@ -361,6 +426,8 @@ export default function SpecialOffersTable({ specialOffers, products }: SpecialO
                            offer.offerType === 'BOGO' ? 'BOGO' : 
                            offer.offerType === 'PERCENTAGE_DISCOUNT' ? 'Percentage Discount' :
                            offer.offerType === 'CART_TRIGGER' ? 'Cart Trigger' :
+                           offer.offerType === 'BUY_X_GET_Y' ? 'Buy X Get Y' :
+                           offer.offerType === 'CART_THRESHOLD' ? 'Cart Threshold' :
                            'Unknown'}
                         </td>
                         <td className="px-4 lg:px-6 py-4 text-sm text-gray-600">
@@ -376,8 +443,8 @@ export default function SpecialOffersTable({ specialOffers, products }: SpecialO
                         <td className="px-4 lg:px-6 py-4 text-sm text-gray-600 max-w-xs truncate" title={getTriggerDescription(offer)}>
                           {getTriggerDescription(offer)}
                         </td>
-                        <td className="px-4 lg:px-6 py-4 text-sm text-gray-600 max-w-xs truncate" title={getRewardNames(offer.rewardItems || '')}>
-                          {offer.offerType === 'CART_TRIGGER' ? getRewardNames(offer.rewardItems || '') : 'N/A'}
+                        <td className="px-4 lg:px-6 py-4 text-sm text-gray-600 max-w-xs truncate" title={getRewardDescription(offer)}>
+                          {getRewardDescription(offer)}
                         </td>
                         <td className="px-4 lg:px-6 py-4">
                           <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeColor(status)}`}>

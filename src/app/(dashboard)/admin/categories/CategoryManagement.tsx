@@ -14,8 +14,8 @@ interface Category {
   taxRate?: number | null
   activeHoursStart?: string | null
   activeHoursEnd?: string | null
-  createdAt: Date
-  updatedAt: Date
+  parentId?: number | null
+  children?: Category[]
   subCategories: SubCategory[]
 }
 
@@ -27,13 +27,105 @@ interface SubCategory {
   displayOrder: number
   color?: string | null
   imageUrl?: string | null
-  createdAt: Date
-  updatedAt: Date
 }
 
 interface CategoryManagementProps {
   categories: Category[]
   userRole: 'ADMIN' | 'CASHIER'
+}
+
+interface CategoryTreeNodeProps {
+  category: Category
+  level: number
+  onToggleStatus: (id: number, isActive: boolean) => void
+  onEdit: (category: Category) => void
+  onDelete: (id: number) => void
+  onAddChild: (parentId: number) => void
+  expandedCategories: Set<number>
+  toggleCategoryExpansion: (id: number) => void
+}
+
+function CategoryTreeNode({ category, level, onToggleStatus, onEdit, onDelete, onAddChild, expandedCategories, toggleCategoryExpansion }: CategoryTreeNodeProps) {
+  const isExpanded = expandedCategories.has(category.id)
+  const indentLevel = level * 16 // 16px per level
+
+  return (
+    <div className="mb-2" style={{ marginLeft: `${indentLevel}px`, borderLeft: level > 0 ? '2px solid #d1d5db' : 'none', paddingLeft: level > 0 ? '12px' : '0' }}>
+      <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-200 mb-2">
+        <div className="flex items-center gap-2">
+          {category.imageUrl && (
+            <img 
+              src={category.imageUrl} 
+              alt={category.name}
+              className="w-6 h-6 object-cover rounded"
+            />
+          )}
+          <span className="text-xs text-gray-800 font-medium">{category.name}</span>
+          {!category.isActive && (
+            <span className="px-1.5 py-0.5 bg-gray-200 text-gray-600 text-xs rounded-full">Inactive</span>
+          )}
+        </div>
+        <div className="flex gap-1">
+          <button
+            onClick={() => onToggleStatus(category.id, !category.isActive)}
+            className={`px-2 py-1 rounded transition-colors text-xs h-7 ${
+              category.isActive 
+                ? 'bg-yellow-500 text-white hover:bg-yellow-600' 
+                : 'bg-green-500 text-white hover:bg-green-600'
+            }`}
+            title={category.isActive ? 'Disable' : 'Enable'}
+          >
+            {category.isActive ? 'Disable' : 'Enable'}
+          </button>
+          <button
+            onClick={() => onEdit(category)}
+            className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors h-7"
+          >
+            Edit
+          </button>
+          <button
+            onClick={() => onDelete(category.id)}
+            className="px-2 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 transition-colors h-7"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+      
+      {/* Add child button */}
+      <button
+        onClick={() => onAddChild(category.id)}
+        className="text-xs text-amber-600 hover:text-amber-700 font-medium mb-2"
+      >
+        + Add Sub-category
+      </button>
+
+      {/* Recursive children */}
+      {category.children && category.children.length > 0 && (
+        <>
+          <button
+            onClick={() => toggleCategoryExpansion(category.id)}
+            className="text-xs text-gray-500 hover:text-gray-700 mb-2"
+          >
+            {isExpanded ? '▼' : '▶'} {category.children.length} sub-categorie{category.children.length !== 1 ? 's' : ''}
+          </button>
+          {isExpanded && category.children.map((child) => (
+            <CategoryTreeNode
+              key={child.id}
+              category={child}
+              level={level + 1}
+              onToggleStatus={onToggleStatus}
+              onEdit={onEdit}
+              onDelete={onDelete}
+              onAddChild={onAddChild}
+              expandedCategories={expandedCategories}
+              toggleCategoryExpansion={toggleCategoryExpansion}
+            />
+          ))}
+        </>
+      )}
+    </div>
+  )
 }
 
 export default function CategoryManagement({ categories, userRole }: CategoryManagementProps) {
@@ -57,7 +149,8 @@ export default function CategoryManagement({ categories, userRole }: CategoryMan
     imageUrl: '',
     taxRate: '',
     activeHoursStart: '',
-    activeHoursEnd: ''
+    activeHoursEnd: '',
+    parentId: ''
   })
 
   const [subCategoryFormData, setSubCategoryFormData] = useState({
@@ -70,7 +163,13 @@ export default function CategoryManagement({ categories, userRole }: CategoryMan
 
   const handleAddCategory = () => {
     setEditingCategory(null)
-    setCategoryFormData({ name: '', description: '', isActive: true, color: '', imageUrl: '', taxRate: '', activeHoursStart: '', activeHoursEnd: '' })
+    setCategoryFormData({ name: '', description: '', isActive: true, color: '', imageUrl: '', taxRate: '', activeHoursStart: '', activeHoursEnd: '', parentId: '' })
+    setShowCategoryModal(true)
+  }
+
+  const handleAddNestedCategory = (parentId: number) => {
+    setEditingCategory(null)
+    setCategoryFormData({ name: '', description: '', isActive: true, color: '', imageUrl: '', taxRate: '', activeHoursStart: '', activeHoursEnd: '', parentId: parentId.toString() })
     setShowCategoryModal(true)
   }
 
@@ -84,7 +183,8 @@ export default function CategoryManagement({ categories, userRole }: CategoryMan
       imageUrl: category.imageUrl || '',
       taxRate: category.taxRate?.toString() || '',
       activeHoursStart: category.activeHoursStart || '',
-      activeHoursEnd: category.activeHoursEnd || ''
+      activeHoursEnd: category.activeHoursEnd || '',
+      parentId: category.parentId?.toString() || ''
     })
     setShowCategoryModal(true)
   }
@@ -100,6 +200,7 @@ export default function CategoryManagement({ categories, userRole }: CategoryMan
     formData.append('taxRate', categoryFormData.taxRate)
     formData.append('activeHoursStart', categoryFormData.activeHoursStart)
     formData.append('activeHoursEnd', categoryFormData.activeHoursEnd)
+    formData.append('parentId', categoryFormData.parentId)
 
     if (editingCategory) {
       formData.append('id', editingCategory.id.toString())
@@ -110,7 +211,7 @@ export default function CategoryManagement({ categories, userRole }: CategoryMan
 
     setShowCategoryModal(false)
     setEditingCategory(null)
-    setCategoryFormData({ name: '', description: '', isActive: true, color: '', imageUrl: '', taxRate: '', activeHoursStart: '', activeHoursEnd: '' })
+    setCategoryFormData({ name: '', description: '', isActive: true, color: '', imageUrl: '', taxRate: '', activeHoursStart: '', activeHoursEnd: '', parentId: '' })
     window.location.reload()
   }
 
@@ -346,6 +447,20 @@ export default function CategoryManagement({ categories, userRole }: CategoryMan
                   rows={2}
                 />
               </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase text-gray-500 mb-1">Parent Category (Optional)</label>
+                <select
+                  value={categoryFormData.parentId}
+                  onChange={(e) => setCategoryFormData({ ...categoryFormData, parentId: e.target.value })}
+                  className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+                  disabled={!!editingCategory}
+                >
+                  <option value="">None (Top-level category)</option>
+                  {categories.map(cat => (
+                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                  ))}
+                </select>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold uppercase text-gray-500 mb-1">Color</label>
@@ -551,6 +666,7 @@ export default function CategoryManagement({ categories, userRole }: CategoryMan
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, category.id)}
             >
+              {/* Main Category Card */}
               <div 
                 className="p-3 border-b border-gray-200 cursor-pointer hover:bg-gray-50 transition-colors"
                 style={{ borderLeft: category.color ? `4px solid ${category.color}` : '4px solid transparent' }}
@@ -603,7 +719,7 @@ export default function CategoryManagement({ categories, userRole }: CategoryMan
                         <p className="text-xs text-gray-600 mt-0.5">{category.description}</p>
                       )}
                       <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
-                        <span>{category.subCategories.length} subcategory{category.subCategories.length !== 1 ? 'ies' : ''}</span>
+                        <span>{category.subCategories.length + (category.children?.length || 0)} subcategory{category.subCategories.length + (category.children?.length || 0) !== 1 ? 'ies' : ''}</span>
                         {analytics && (
                           <>
                             <span>• {analytics.activeProducts} active products</span>
@@ -650,8 +766,8 @@ export default function CategoryManagement({ categories, userRole }: CategoryMan
                 </div>
               </div>
               
-              {/* Subcategories - Expandable */}
-              {category.subCategories.length > 0 && (
+              {/* Nested Children Categories - Recursive Tree View */}
+              {(category.subCategories.length > 0 || (category.children && category.children.length > 0)) && (
                 <div className="border-t border-gray-200">
                   <button
                     onClick={() => {
@@ -661,15 +777,16 @@ export default function CategoryManagement({ categories, userRole }: CategoryMan
                     className="w-full p-2 bg-gray-50 hover:bg-gray-100 transition-colors flex items-center justify-between text-xs font-medium text-gray-700"
                   >
                     <span className="flex items-center gap-2">
-                      {isExpanded ? '▼' : '▶'} Sub-categories ({category.subCategories.length})
+                      {isExpanded ? '▼' : '▶'} Sub-categories ({category.subCategories.length + (category.children?.length || 0)})
                     </span>
                   </button>
                   {isExpanded && (
-                    <div className="p-3 bg-gray-50 space-y-2">
+                    <div className="p-3 bg-gray-50">
+                      {/* Legacy SubCategories */}
                       {category.subCategories.map((subCategory) => (
                         <div 
                           key={subCategory.id} 
-                          className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-200"
+                          className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-200 mb-2"
                           style={{ borderLeft: subCategory.color ? `3px solid ${subCategory.color}` : '3px solid transparent' }}
                         >
                           <div className="flex items-center gap-2">
@@ -712,18 +829,38 @@ export default function CategoryManagement({ categories, userRole }: CategoryMan
                           </div>
                         </div>
                       ))}
+                      {/* Recursive Children Categories */}
+                      {category.children && category.children.map((child) => (
+                        <CategoryTreeNode 
+                          key={child.id}
+                          category={child}
+                          level={1}
+                          onToggleStatus={handleToggleCategoryStatus}
+                          onEdit={handleEditCategory}
+                          onDelete={handleDeleteCategory}
+                          onAddChild={handleAddNestedCategory}
+                          expandedCategories={expandedCategories}
+                          toggleCategoryExpansion={toggleCategoryExpansion}
+                        />
+                      ))}
                     </div>
                   )}
                 </div>
               )}
 
               {/* Add Subcategory Button */}
-              <div className="p-3 border-t border-gray-200 bg-gray-50">
+              <div className="p-3 border-t border-gray-200 bg-gray-50 flex gap-3">
                 <button
                   onClick={() => handleAddSubCategory(category.id)}
                   className="text-xs text-amber-600 hover:text-amber-700 font-medium"
                 >
-                  + Add Sub-category
+                  + Add Sub-category (Legacy)
+                </button>
+                <button
+                  onClick={() => handleAddNestedCategory(category.id)}
+                  className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                >
+                  + Add Nested Category
                 </button>
               </div>
             </div>

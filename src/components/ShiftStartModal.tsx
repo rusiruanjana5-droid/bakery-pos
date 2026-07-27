@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { logout } from '@/actions/auth'
+import { useFocusTrap, useAutoFocus } from '@/hooks/useFocusTrap'
 
 interface ShiftStartModalProps {
   isOpen: boolean
@@ -13,22 +14,30 @@ interface ShiftStartModalProps {
   onSubmit: (openingBalance: number, notes?: string) => void
 }
 
-export default function ShiftStartModal({ 
-  isOpen, 
-  cashierName, 
-  lastShiftClosingBalance, 
+export default function ShiftStartModal({
+  isOpen,
+  cashierName,
+  lastShiftClosingBalance,
   defaultShiftFloat = 0,
   allowEditOpeningBalance = true,
-  onSubmit 
+  onSubmit
 }: ShiftStartModalProps) {
   const router = useRouter()
-  
+  const modalRef = useRef<HTMLDivElement>(null)
+  const openingBalanceInputRef = useRef<HTMLInputElement>(null)
+
   // Auto-pre-fill: use defaultShiftFloat if set (>0), otherwise use previous closing balance
   const initialBalance = defaultShiftFloat > 0 ? defaultShiftFloat : (lastShiftClosingBalance || 0)
-  
+
   const [openingBalance, setOpeningBalance] = useState(initialBalance)
   const [notes, setNotes] = useState('')
   const [currentTime, setCurrentTime] = useState('')
+
+  // Enable focus trap when modal is open
+  useFocusTrap(isOpen, modalRef)
+
+  // Auto-focus opening balance input when modal opens (if editable)
+  useAutoFocus(isOpen && allowEditOpeningBalance, openingBalanceInputRef)
 
   useEffect(() => {
     // Update current time every second (Sri Lanka Standard Time)
@@ -116,11 +125,12 @@ export default function ShiftStartModal({
   if (!isOpen) return null
 
   return (
-    <div 
+    <div
       className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
       onClick={handleBackdropClick}
     >
-      <div 
+      <div
+        ref={modalRef}
         className="bg-white rounded-lg shadow-xl w-full max-w-md"
         onClick={(e) => e.stopPropagation()}
       >
@@ -176,6 +186,7 @@ export default function ShiftStartModal({
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm font-medium">Rs.</span>
               <input
+                ref={openingBalanceInputRef}
                 type="number"
                 step="0.01"
                 min="0"
@@ -183,8 +194,8 @@ export default function ShiftStartModal({
                 onChange={(e) => setOpeningBalance(parseFloat(e.target.value) || 0)}
                 readOnly={!allowEditOpeningBalance}
                 className={`w-full pl-10 pr-3 py-2 text-sm border rounded-lg font-medium ${
-                  !allowEditOpeningBalance 
-                    ? 'bg-gray-100 text-gray-600 cursor-not-allowed border-gray-300' 
+                  !allowEditOpeningBalance
+                    ? 'bg-gray-100 text-gray-600 cursor-not-allowed border-gray-300'
                     : 'border-gray-300 focus:ring-2 focus:ring-amber-500 focus:border-transparent'
                 }`}
                 required

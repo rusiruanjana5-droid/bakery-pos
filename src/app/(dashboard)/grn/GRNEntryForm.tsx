@@ -2,12 +2,14 @@
 
 import { useState, useEffect } from 'react'
 import { createGRN } from '@/actions/grn'
+import { getPurchaseOrders, getPurchaseOrderById } from '@/actions/purchaseOrder'
 import CategorySelector from '@/components/CategorySelector'
 
 interface GRNEntryFormProps {
   products: any[]
   suppliers: any[]
   categories: any[]
+  getPurchaseOrdersBySupplier?: (supplierId: number) => Promise<any>
 }
 
 interface InvoiceItem {
@@ -31,15 +33,20 @@ interface InvoiceItem {
   addedAt: Date
 }
 
-export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormProps) {
+export function GRNEntryForm({ products, suppliers, categories, getPurchaseOrdersBySupplier }: GRNEntryFormProps) {
   const [mounted, setMounted] = useState(false)
   const [invoiceHeader, setInvoiceHeader] = useState({
     supplierId: '',
     invoiceNumber: '',
     poNumber: '',
-    paymentType: 'New Ref',
+    paymentType: 'Cash',
     creditPeriod: 30,
-    receivedDate: new Date().toISOString().split('T')[0]
+    receivedDate: new Date().toISOString().split('T')[0],
+    // Cheque fields
+    chequeNumber: '',
+    bankName: '',
+    chequeDate: '',
+    chequeStatus: 'PENDING'
   })
   const [itemEntry, setItemEntry] = useState({
     productId: '',
@@ -88,6 +95,9 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
         setInvoiceItems(draft.invoiceItems)
         setSelectedCategoryId(draft.selectedCategoryId)
         setSelectedSubCategoryId(draft.selectedSubCategoryId)
+        if (draft.itemEntry) {
+          setItemEntry(draft.itemEntry)
+        }
       } catch (e) {
         console.error('Failed to load draft:', e)
       }
@@ -102,12 +112,13 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
         invoiceHeader,
         invoiceItems,
         selectedCategoryId,
-        selectedSubCategoryId
+        selectedSubCategoryId,
+        itemEntry
       }
       localStorage.setItem('grn_draft', JSON.stringify(draft))
       setTimeout(() => setAutoSaveStatus('saved'), 500)
     }
-  }, [invoiceHeader, invoiceItems, selectedCategoryId, selectedSubCategoryId, mounted])
+  }, [invoiceHeader, invoiceItems, selectedCategoryId, selectedSubCategoryId, itemEntry, mounted])
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type })
@@ -149,7 +160,8 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
       invoiceHeader,
       invoiceItems,
       selectedCategoryId,
-      selectedSubCategoryId
+      selectedSubCategoryId,
+      itemEntry
     }
     localStorage.setItem('grn_draft', JSON.stringify(draft))
     showToast('Draft saved successfully', 'success')
@@ -161,13 +173,36 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
       supplierId: '',
       invoiceNumber: '',
       poNumber: '',
-      paymentType: 'New Ref',
+      paymentType: 'Cash',
       creditPeriod: 30,
-      receivedDate: new Date().toISOString().split('T')[0]
+      receivedDate: new Date().toISOString().split('T')[0],
+      // Cheque fields
+      chequeNumber: '',
+      bankName: '',
+      chequeDate: '',
+      chequeStatus: 'PENDING'
     })
     setInvoiceItems([])
     setSelectedCategoryId(null)
     setSelectedSubCategoryId(null)
+    setItemEntry({
+      productId: '',
+      quantity: 0,
+      freeQuantity: 0,
+      uom: 'Kg',
+      unitCost: 0,
+      discount: 0,
+      discountType: 'percentage',
+      landedCost: 0,
+      freightCost: 0,
+      handlingCost: 0,
+      taxCost: 0,
+      expiryDate: '',
+      batchNumber: '',
+      qcStatus: 'Passed',
+      rejectedQty: 0,
+      rejectionReason: ''
+    })
     showToast('Draft cleared', 'success')
   }
 
@@ -200,6 +235,34 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
   useEffect(() => {
     checkSellingPriceMargin()
   }, [itemEntry.unitCost, itemEntry.landedCost, itemEntry.freightCost, itemEntry.handlingCost, itemEntry.taxCost, itemEntry.quantity, itemEntry.productId])
+
+  // Auto-calculate landed cost based on unit cost, discount, and extra costs
+  useEffect(() => {
+    if (itemEntry.unitCost && itemEntry.quantity > 0) {
+      const unitCost = itemEntry.unitCost
+      const quantity = itemEntry.quantity
+      const freightCost = itemEntry.freightCost || 0
+      const handlingCost = itemEntry.handlingCost || 0
+      const taxCost = itemEntry.taxCost || 0
+      const discount = itemEntry.discount || 0
+      const discountType = itemEntry.discountType
+      
+      let baseCost = unitCost
+      if (discountType === 'percentage') {
+        baseCost = baseCost - (baseCost * (discount / 100))
+      } else {
+        baseCost = baseCost - (discount / quantity)
+      }
+      
+      const totalExtraCost = freightCost + handlingCost + taxCost
+      const landedCost = baseCost + (totalExtraCost / quantity)
+      
+      setItemEntry(prev => ({
+        ...prev,
+        landedCost: parseFloat(landedCost.toFixed(2))
+      }))
+    }
+  }, [itemEntry.unitCost, itemEntry.discount, itemEntry.discountType, itemEntry.freightCost, itemEntry.handlingCost, itemEntry.taxCost, itemEntry.quantity])
 
   const filteredProducts = selectedCategory === 'All' 
     ? products 
@@ -426,53 +489,240 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
     return trueUnitCost
   }
 
-  const handlePOSelection = (poNumber: string) => {
-    if (!poNumber) {
+  const handleSupplierChange = (newSupplierId: string) => {
+    const previousSupplierId = invoiceHeader.supplierId
+    
+    // If supplier is being cleared or changed, reset PO selection
+    if (newSupplierId === '' || newSupplierId !== previousSupplierId) {
+      console.log('Supplier changed, resetting PO selection')
+      setInvoiceHeader(prev => ({
+        ...prev,
+        supplierId: newSupplierId,
+        poNumber: '' // Reset PO number when supplier changes
+      }))
+      setSelectedPO(null)
       setInvoiceItems([])
+      setItemEntry({
+        productId: '',
+        quantity: 0,
+        freeQuantity: 0,
+        uom: 'Kg',
+        unitCost: 0,
+        discount: 0,
+        discountType: 'percentage',
+        landedCost: 0,
+        freightCost: 0,
+        handlingCost: 0,
+        taxCost: 0,
+        expiryDate: '',
+        batchNumber: '',
+        qcStatus: 'Passed',
+        rejectedQty: 0,
+        rejectionReason: ''
+      })
+      setSelectedCategoryId(null)
+      setSelectedSubCategoryId(null)
+    } else {
+      setInvoiceHeader(prev => ({
+        ...prev,
+        supplierId: newSupplierId
+      }))
+    }
+  }
+
+  const handlePOSelection = async (poNumber: string) => {
+    console.log('=== PO SELECTION START ===')
+    console.log('PO Selection triggered:', poNumber)
+    console.log('Current invoiceItems length:', invoiceItems.length)
+    
+    if (!poNumber) {
+      console.log('PO cleared, resetting items and dates')
+      // Clear all auto-filled fields when PO is unselected
+      setInvoiceItems([])
+      setSelectedPO(null)
+      // Reset received date to current date
+      setInvoiceHeader(prev => ({
+        ...prev,
+        receivedDate: new Date().toISOString().split('T')[0]
+      }))
+      // Don't clear supplier field as user might want to keep it
       return
     }
 
-    // Mock PO data - in a real implementation, this would fetch from the database
-    const mockPOData: { [key: string]: any[] } = {
-      'PO-2024-001': [
-        { productId: '1', quantity: 100, unitCost: 2500, uom: 'Kg' },
-        { productId: '2', quantity: 50, unitCost: 3000, uom: 'Kg' }
-      ],
-      'PO-2024-002': [
-        { productId: '3', quantity: 200, unitCost: 2800, uom: 'Kg' }
-      ],
-      'PO-2024-003': [
-        { productId: '4', quantity: 75, unitCost: 4500, uom: 'Ltr' },
-        { productId: '5', quantity: 50, unitCost: 3200, uom: 'Ltr' }
-      ]
-    }
-
-    const poItems = mockPOData[poNumber] || []
+    // First try to find PO in local array
+    let selectedPO = purchaseOrders.find(po => String(po.poNumber) === String(poNumber))
     
-    const newInvoiceItems: InvoiceItem[] = poItems.map((item, index) => ({
-      id: (Date.now() + index).toString(),
-      productId: item.productId,
-      quantity: item.quantity,
-      freeQuantity: 0,
-      uom: item.uom,
-      unitCost: item.unitCost,
-      discount: 0,
-      discountType: 'percentage',
-      landedCost: 0,
-      freightCost: 0,
-      handlingCost: 0,
-      taxCost: 0,
-      expiryDate: '',
-      batchNumber: '',
-      qcStatus: 'Passed',
-      rejectedQty: 0,
-      rejectionReason: '',
-      addedAt: new Date()
-    }))
-
-    setInvoiceItems(newInvoiceItems)
-    showToast(`PO ${poNumber} loaded with ${newInvoiceItems.length} items`, 'success')
+    if (!selectedPO) {
+      console.log('PO not found in local array, fetching from backend...')
+      // Fetch PO details from backend
+      const result = await getPurchaseOrderById(parseInt(poNumber.replace(/\D/g, '')))
+      if (result.success && result.purchaseOrder) {
+        selectedPO = result.purchaseOrder
+        console.log('PO fetched from backend:', selectedPO)
+      } else {
+        console.error('Failed to fetch PO from backend:', result.error)
+        showToast('Failed to load PO details', 'error')
+        return
+      }
+    } else {
+      console.log('Found PO in local array:', selectedPO)
+    }
+    
+    console.log('Purchase orders array length:', purchaseOrders.length)
+    
+    if (selectedPO) {
+      setSelectedPO(selectedPO)
+      
+      // Auto-fill supplier field from PO
+      if (selectedPO.supplierId) {
+        console.log('Setting supplier ID:', selectedPO.supplierId)
+        setInvoiceHeader(prev => ({
+          ...prev,
+          supplierId: selectedPO.supplierId.toString()
+        }))
+        
+        // Auto-fill credit period from supplier if available
+        const supplier = suppliers.find(s => s.id === selectedPO.supplierId)
+        console.log('Found supplier:', supplier)
+        if (supplier && supplier.creditPeriod) {
+          console.log('Setting credit period:', supplier.creditPeriod)
+          setInvoiceHeader(prev => ({
+            ...prev,
+            creditPeriod: supplier.creditPeriod
+          }))
+        }
+      }
+      
+      // Auto-fill received date from PO expected date
+      if (selectedPO.expectedDate) {
+        const expectedDate = new Date(selectedPO.expectedDate).toISOString().split('T')[0]
+        console.log('Setting received date from PO expected date:', expectedDate)
+        setInvoiceHeader(prev => ({
+          ...prev,
+          receivedDate: expectedDate
+        }))
+      }
+      
+      // Auto-populate invoice items from PO
+      console.log('PO items array:', selectedPO.items)
+      console.log('PO items length:', selectedPO.items?.length || 0)
+      console.log('PO items type:', typeof selectedPO.items)
+      
+      if (!selectedPO.items || selectedPO.items.length === 0) {
+        console.error('ERROR: PO has no items array or items array is empty!')
+        showToast('PO has no items', 'error')
+        return
+      }
+      
+      const newInvoiceItems: InvoiceItem[] = selectedPO.items.map((item: any, index: number) => {
+        console.log(`Mapping item ${index}:`, {
+          productId: item.productId,
+          quantity: item.quantity,
+          receivedQuantity: item.receivedQuantity,
+          unitCost: item.unitCost
+        })
+        return {
+          id: (Date.now() + index).toString(),
+          productId: item.productId.toString(),
+          quantity: item.quantity - item.receivedQuantity, // Allow partial delivery
+          freeQuantity: 0,
+          uom: 'Kg',
+          unitCost: item.unitCost,
+          discount: 0,
+          discountType: 'percentage',
+          landedCost: 0,
+          freightCost: 0,
+          handlingCost: 0,
+          taxCost: 0,
+          expiryDate: '',
+          batchNumber: '',
+          qcStatus: 'Passed',
+          rejectedQty: 0,
+          rejectionReason: '',
+          addedAt: new Date()
+        }
+      })
+      
+      console.log('New invoice items to set:', newInvoiceItems)
+      console.log('New invoice items length:', newInvoiceItems.length)
+      
+      setInvoiceItems(newInvoiceItems)
+      
+      // Auto-fill the "Add Item to Invoice" input fields with the first PO item
+      if (newInvoiceItems.length > 0) {
+        const firstItem = newInvoiceItems[0]
+        const product = products.find(p => p.id.toString() === firstItem.productId)
+        
+        console.log('Auto-filling input fields with first PO item:', firstItem)
+        console.log('Found product:', product)
+        
+        // Set itemEntry state to populate input fields
+        setItemEntry({
+          productId: firstItem.productId,
+          quantity: firstItem.quantity,
+          freeQuantity: firstItem.freeQuantity,
+          uom: firstItem.uom,
+          unitCost: firstItem.unitCost,
+          discount: firstItem.discount,
+          discountType: firstItem.discountType,
+          landedCost: firstItem.landedCost,
+          freightCost: firstItem.freightCost,
+          handlingCost: firstItem.handlingCost,
+          taxCost: firstItem.taxCost,
+          expiryDate: firstItem.expiryDate,
+          batchNumber: firstItem.batchNumber,
+          qcStatus: firstItem.qcStatus,
+          rejectedQty: firstItem.rejectedQty,
+          rejectionReason: firstItem.rejectionReason
+        })
+        
+        // Set category/sub-category based on product
+        if (product) {
+          if (product.categoryId) {
+            setSelectedCategoryId(product.categoryId)
+            const category = categories.find(c => c.id === product.categoryId)
+            if (category) {
+              setSelectedCategory(category.name)
+            }
+          }
+          if (product.subCategoryId) {
+            setSelectedSubCategoryId(product.subCategoryId)
+          }
+        }
+      }
+      
+      // Force a state update check
+      setTimeout(() => {
+        console.log('State update check - invoiceItems length after set:', invoiceItems.length)
+      }, 100)
+      
+      showToast(`PO ${poNumber} loaded with ${newInvoiceItems.length} items`, 'success')
+      console.log('=== PO SELECTION END ===')
+    } else {
+      console.error('ERROR: PO not found in purchaseOrders array')
+      console.log('Available PO numbers:', purchaseOrders.map(po => po.poNumber))
+    }
   }
+
+  // Load purchase orders initially and when supplier changes
+  useEffect(() => {
+    const loadPurchaseOrders = async () => {
+      if (invoiceHeader.supplierId && getPurchaseOrdersBySupplier) {
+        // Filter by supplier if one is selected
+        const result = await getPurchaseOrdersBySupplier(parseInt(invoiceHeader.supplierId))
+        if (result.success) {
+          setPurchaseOrders(result.purchaseOrders ?? [])
+        }
+      } else {
+        // Load all POs if no supplier selected
+        const result = await getPurchaseOrders()
+        if (result.success) {
+          setPurchaseOrders(result.purchaseOrders ?? [])
+        }
+      }
+    }
+    loadPurchaseOrders()
+  }, [invoiceHeader.supplierId, getPurchaseOrdersBySupplier])
 
   const checkPriceVariance = () => {
     if (!itemEntry.productId || !itemEntry.unitCost) {
@@ -545,6 +795,13 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
         formData.append('paymentType', invoiceHeader.paymentType)
         formData.append('creditPeriod', invoiceHeader.creditPeriod.toString())
         formData.append('receivedDate', invoiceHeader.receivedDate)
+        // Add cheque fields if payment type is cheque
+        if (invoiceHeader.paymentType === 'Cheque / Bank Transfer') {
+          formData.append('chequeNumber', invoiceHeader.chequeNumber)
+          formData.append('bankName', invoiceHeader.bankName)
+          formData.append('chequeDate', invoiceHeader.chequeDate)
+          formData.append('chequeStatus', invoiceHeader.chequeStatus)
+        }
         formData.append('expiryDate', item.expiryDate)
         formData.append('batchNumber', item.batchNumber)
         formData.append('qcStatus', item.qcStatus)
@@ -559,9 +816,14 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
         supplierId: '',
         invoiceNumber: '',
         poNumber: '',
-        paymentType: 'New Ref',
+        paymentType: 'Cash',
         creditPeriod: 30,
-        receivedDate: new Date().toISOString().split('T')[0]
+        receivedDate: new Date().toISOString().split('T')[0],
+        // Cheque fields
+        chequeNumber: '',
+        bankName: '',
+        chequeDate: '',
+        chequeStatus: 'PENDING'
       })
       setInvoiceItems([])
       setSelectedCategoryId(null)
@@ -669,7 +931,7 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
             <label className="block text-xs font-semibold uppercase text-gray-500 mb-1">Supplier</label>
             <select
               value={invoiceHeader.supplierId}
-              onChange={(e) => setInvoiceHeader({ ...invoiceHeader, supplierId: e.target.value })}
+              onChange={(e) => handleSupplierChange(e.target.value)}
               className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
             >
               <option value="">Select supplier</option>
@@ -702,9 +964,13 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
               className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
             >
               <option value="">Select PO (Optional)</option>
-              <option value="PO-2024-001">PO-2024-001 - Flour Supplies</option>
-              <option value="PO-2024-002">PO-2024-002 - Sugar Order</option>
-              <option value="PO-2024-003">PO-2024-003 - Dairy Products</option>
+              {purchaseOrders
+                .filter(po => !invoiceHeader.supplierId || String(po.supplierId) === String(invoiceHeader.supplierId))
+                .map((po) => (
+                <option key={po.poNumber} value={po.poNumber}>
+                  {po.poNumber} - {po.items.length} items
+                </option>
+              ))}
             </select>
           </div>
           <div>
@@ -714,10 +980,10 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
               onChange={(e) => setInvoiceHeader({ ...invoiceHeader, paymentType: e.target.value })}
               className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
             >
-              <option value="New Ref">New Ref</option>
-              <option value="Against Ref">Against Ref</option>
+              <option value="Cash">Cash</option>
+              <option value="Credit">Credit</option>
+              <option value="Cheque / Bank Transfer">Cheque / Bank Transfer</option>
               <option value="Advance">Advance</option>
-              <option value="On Account">On Account</option>
             </select>
           </div>
           <div>
@@ -727,7 +993,10 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
               value={invoiceHeader.creditPeriod}
               onChange={(e) => setInvoiceHeader({ ...invoiceHeader, creditPeriod: parseInt(e.target.value) || 30 })}
               placeholder="30"
-              className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+              disabled={invoiceHeader.paymentType === 'Cash'}
+              className={`w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8 ${
+                invoiceHeader.paymentType === 'Cash' ? 'bg-gray-100 cursor-not-allowed' : ''
+              }`}
             />
           </div>
           <div>
@@ -740,8 +1009,60 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
             />
           </div>
         </div>
+
+        {/* Cheque/Bank Transfer Fields */}
+        {invoiceHeader.paymentType === 'Cheque / Bank Transfer' && (
+          <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <h4 className="text-sm font-semibold text-amber-900 mb-3">Cheque / Bank Transfer Details</h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase text-gray-500 mb-1">Cheque / Ref Number *</label>
+                <input
+                  type="text"
+                  value={invoiceHeader.chequeNumber}
+                  onChange={(e) => setInvoiceHeader({ ...invoiceHeader, chequeNumber: e.target.value })}
+                  placeholder="Enter cheque or reference number"
+                  className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase text-gray-500 mb-1">Bank Name *</label>
+                <input
+                  type="text"
+                  value={invoiceHeader.bankName}
+                  onChange={(e) => setInvoiceHeader({ ...invoiceHeader, bankName: e.target.value })}
+                  placeholder="Enter bank name"
+                  className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase text-gray-500 mb-1">Cheque Date / Realize Date *</label>
+                <input
+                  type="date"
+                  value={invoiceHeader.chequeDate}
+                  onChange={(e) => setInvoiceHeader({ ...invoiceHeader, chequeDate: e.target.value })}
+                  className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold uppercase text-gray-500 mb-1">Cheque Status</label>
+                <select
+                  value={invoiceHeader.chequeStatus}
+                  onChange={(e) => setInvoiceHeader({ ...invoiceHeader, chequeStatus: e.target.value })}
+                  className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+                >
+                  <option value="PENDING">Pending / Issued</option>
+                  <option value="REALIZED">Realized / Cleared</option>
+                  <option value="RETURNED">Returned</option>
+                  <option value="CANCELLED">Cancelled</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Payment Due Date & Status */}
-        {invoiceHeader.creditPeriod && invoiceHeader.receivedDate && (
+        {invoiceHeader.paymentType !== 'Cash' && invoiceHeader.creditPeriod && invoiceHeader.receivedDate && (
           <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
             <div className="flex justify-between items-center">
               <div>
@@ -756,8 +1077,27 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
               </div>
               <div className="text-right">
                 <p className="text-sm text-blue-800 font-medium">Payment Status</p>
-                <span className="inline-block px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
-                  Pending
+                <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
+                  invoiceHeader.paymentType === 'Cash' 
+                    ? 'bg-green-100 text-green-800' 
+                    : 'bg-blue-100 text-blue-800'
+                }`}>
+                  {invoiceHeader.paymentType === 'Cash' ? 'Paid' : 'Pending'}
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+        {invoiceHeader.paymentType === 'Cash' && (
+          <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-lg">
+            <div className="flex justify-between items-center">
+              <div>
+                <p className="text-sm text-green-800 font-medium">Payment Status</p>
+                <p className="text-xs text-green-600">Cash payment - no credit period required</p>
+              </div>
+              <div className="text-right">
+                <span className="inline-block px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
+                  Paid
                 </span>
               </div>
             </div>
@@ -889,8 +1229,8 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
               </div>
             </div>
 
-            {/* ROW 2: Batch, Qty & UOM */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* ROW 2: Batch, Qty, UOM & Expiry */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-600 mb-1">
                   Batch / Lot Number
@@ -932,6 +1272,63 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
                     <option key={uom} value={uom}>{uom}</option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-600 mb-1">
+                  Expiry Date
+                </label>
+                <input
+                  type="date"
+                  value={itemEntry.expiryDate}
+                  onChange={(e) => setItemEntry({ ...itemEntry, expiryDate: e.target.value })}
+                  className="w-full h-10 px-3 border border-slate-300 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            {/* ROW 3: QC Status, Rejected Qty & Reason */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-600 mb-1">
+                  QC Status
+                </label>
+                <select
+                  value={itemEntry.qcStatus}
+                  onChange={(e) => setItemEntry({ ...itemEntry, qcStatus: e.target.value })}
+                  className="w-full h-10 px-3 border border-slate-300 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="Passed">Passed</option>
+                  <option value="Pending QC">Pending QC</option>
+                  <option value="Rejected">Rejected</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-600 mb-1">
+                  Rejected Qty
+                </label>
+                <input
+                  type="number"
+                  value={itemEntry.rejectedQty}
+                  onChange={(e) => setItemEntry({ ...itemEntry, rejectedQty: parseFloat(e.target.value) || 0 })}
+                  placeholder="0"
+                  min="0"
+                  className="w-full h-10 px-3 border border-slate-300 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase text-slate-600 mb-1">
+                  Rejection Reason
+                </label>
+                <input
+                  type="text"
+                  value={itemEntry.rejectionReason}
+                  onChange={(e) => setItemEntry({ ...itemEntry, rejectionReason: e.target.value })}
+                  placeholder="Reason for rejection"
+                  className="w-full h-10 px-3 border border-slate-300 rounded-md bg-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
               </div>
             </div>
           </div>
@@ -1006,11 +1403,12 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
                 type="number"
                 step="0.01"
                 value={itemEntry.landedCost}
-                onChange={(e) => setItemEntry({ ...itemEntry, landedCost: parseFloat(e.target.value) || 0 })}
+                readOnly
                 placeholder="0.00"
                 min="0"
-                className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
+                className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed h-8"
               />
+              <p className="mt-1 text-xs text-gray-500">Auto-calculated from unit cost, discount, and extra charges</p>
             </div>
           </div>
 
@@ -1048,56 +1446,6 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
                 onChange={(e) => setItemEntry({ ...itemEntry, taxCost: parseFloat(e.target.value) || 0 })}
                 placeholder="0.00"
                 min="0"
-                className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Section C: Quality Control & Expiry */}
-        <div className="mb-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
-          <h3 className="text-xs font-semibold text-purple-800 uppercase tracking-wider mb-3">Quality Control & Expiry</h3>
-          
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-3">
-            <div>
-              <label className="block text-xs font-semibold uppercase text-gray-500 mb-1">Expiry Date</label>
-              <input
-                type="date"
-                value={itemEntry.expiryDate}
-                onChange={(e) => setItemEntry({ ...itemEntry, expiryDate: e.target.value })}
-                className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase text-gray-500 mb-1">QC Status</label>
-              <select
-                value={itemEntry.qcStatus}
-                onChange={(e) => setItemEntry({ ...itemEntry, qcStatus: e.target.value })}
-                className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
-              >
-                <option value="Passed">Passed</option>
-                <option value="Pending QC">Pending QC</option>
-                <option value="Rejected">Rejected</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase text-gray-500 mb-1">Rejected Qty</label>
-              <input
-                type="number"
-                value={itemEntry.rejectedQty}
-                onChange={(e) => setItemEntry({ ...itemEntry, rejectedQty: parseFloat(e.target.value) || 0 })}
-                placeholder="0"
-                min="0"
-                className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold uppercase text-gray-500 mb-1">Rejection Reason</label>
-              <input
-                type="text"
-                value={itemEntry.rejectionReason}
-                onChange={(e) => setItemEntry({ ...itemEntry, rejectionReason: e.target.value })}
-                placeholder="Reason for rejection"
                 className="w-full px-2 py-1.5 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-transparent h-8"
               />
             </div>
@@ -1160,7 +1508,7 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
               </svg>
-              {editingItemId ? 'Update Item' : 'Add Item to Bill'}
+              {editingItemId ? 'Update Item' : 'Add Item to GRN'}
             </button>
           </div>
         </div>
@@ -1169,7 +1517,7 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
       {/* Current Invoice Items Table */}
       <div className="shadow-sm border border-slate-200 bg-white rounded-lg overflow-hidden">
         <div className="p-3 border-b border-gray-200">
-          <h2 className="text-sm font-bold text-gray-800">Current Invoice Items</h2>
+          <h2 className="text-sm font-bold text-gray-800">Received Stock Items</h2>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left min-w-[1200px]">
@@ -1298,9 +1646,13 @@ export function GRNEntryForm({ products, suppliers, categories }: GRNEntryFormPr
                   supplierId: '', 
                   invoiceNumber: '',
                   poNumber: '',
-                  paymentType: 'New Ref',
+                  paymentType: 'Cash',
                   creditPeriod: 30,
-                  receivedDate: new Date().toISOString().split('T')[0]
+                  receivedDate: new Date().toISOString().split('T')[0],
+                  chequeNumber: '',
+                  bankName: '',
+                  chequeDate: '',
+                  chequeStatus: 'PENDING'
                 })
                 setInvoiceItems([])
                 setSelectedCategoryId(null)

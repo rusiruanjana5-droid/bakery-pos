@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
@@ -26,6 +26,22 @@ enum PaymentStatus {
   OVERDUE
 }
 
+enum POStatus {
+  DRAFT
+  PENDING_APPROVAL
+  ORDERED
+  PARTIALLY_RECEIVED
+  COMPLETED
+  CANCELLED
+}
+
+enum ChequeStatus {
+  PENDING
+  REALIZED
+  RETURNED
+  CANCELLED
+}
+
 model User {
   id              Int         @id @default(autoincrement())
   username        String      @unique
@@ -38,6 +54,8 @@ model User {
   createdAt       DateTime    @default(now())
   updatedAt       DateTime?   @updatedAt
   shifts          Shift[]
+  auditLogsFrom   ShiftAuditLog[] @relation("ShiftAuditFrom")
+  auditLogsTo     ShiftAuditLog[] @relation("ShiftAuditTo")
 }
 
 model Shift {
@@ -55,9 +73,14 @@ model Shift {
   totalRevenue    Float    @default(0)
   discrepancy     Float?   // Difference between expected and actual cash (positive = excess, negative = shortage)
   notes           String?
-  status          ShiftStatus @default(OPEN)
+  status          ShiftStatus @default(ACTIVE)
+  pausedAt        DateTime? // When shift was paused (for mid-shift handover)
+  resumedAt       DateTime? // When shift was resumed after pause
+  totalPauseDuration Int? @default(0) // Total pause duration in seconds
+  currentSalesSnapshot Float? @default(0) // Sales snapshot at pause time
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  auditLogs       ShiftAuditLog[]
 
   @@index([userId])
   @@index([openedAt])
@@ -65,8 +88,9 @@ model Shift {
 }
 
 enum ShiftStatus {
-  OPEN
-  CLOSED
+  ACTIVE
+  PAUSED
+  ENDED
 }
 
 enum AlertChannel {
@@ -100,6 +124,7 @@ model Supplier {
   creditLimit  Float?       @default(0)
   currentBalance Float?     @default(0)
   creditPeriod Int?         @default(30) // Default 30 days credit period
+  paymentStatus String?     // PAID, PENDING, PARTIALLY_PAID, OVERDUE
   contactPerson String?     // Contact person name
   email        String?      // Contact email
   address      String?      // Physical address
@@ -111,7 +136,7 @@ model Supplier {
 
 model Category {
   id              Int          @id @default(autoincrement())
-  name            String       @unique
+  name            String       
   description     String?
   isActive        Boolean      @default(true)
   displayOrder    Int          @default(0) // For drag-and-drop reordering
@@ -120,12 +145,15 @@ model Category {
   taxRate         Float?       @default(0) // Default tax rate % for products in this category
   activeHoursStart String?     // Start time for availability (e.g., "06:00")
   activeHoursEnd  String?     // End time for availability (e.g., "23:00")
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @default(now()) @updatedAt
-  subCategories   SubCategory[]
+  parentId        Int?         // For multi-level nesting - null for top-level categories
+  parent          Category?    @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children        Category[]   @relation("CategoryHierarchy")
+  subCategories   SubCategory[] // Legacy - kept for backward compatibility
   products        Product[]
   suppliers       Supplier[]
   grns            GRN[]
+
+  @@unique([parentId, name])
 }
 
 model SubCategory {
@@ -194,9 +222,9 @@ model GRN {
   freightCost     Float?   @default(0)
   handlingCost    Float?   @default(0)
   taxCost         Float?   @default(0)
-  trueUnitCost    Float?   // Calculated true cost including landed costs
+  trueUnitCost    Float?  // Calculated true cost including landed costs
   totalAmount     Float?   @default(0) // Total invoice amount for payment tracking
-  balanceAmount   Float?   @default(0) // Remaining balance after payments
+  balanceAmount   Float?   // Remaining balance after payments (calculated as totalAmount - paidAmount)
   expiryDate      DateTime?
   batchNumber     String?
   qcStatus        String?  @default("Passed")
@@ -204,6 +232,11 @@ model GRN {
   rejectionReason String?
   paymentStatus   PaymentStatus @default(PENDING)
   paidAmount      Float?   @default(0)
+  // Cheque/Bank Transfer fields
+  chequeNumber    String?  // Cheque or reference number
+  bankName        String?  // Bank name
+  chequeDate      DateTime? // Cheque date or realization date
+  chequeStatus    ChequeStatus? @default(PENDING) // Cheque status
   supplierId      Int
   categoryId      Int?
   subCategoryId   Int?
@@ -323,6 +356,8 @@ enum OfferType {
   BOGO
   PERCENTAGE_DISCOUNT
   CART_TRIGGER
+  BUY_X_GET_Y
+  CART_THRESHOLD
 }
 
 enum TriggerType {
@@ -330,6 +365,12 @@ enum TriggerType {
   SELECTED_CATEGORY
   SELECTED_PRODUCTS
   MIN_BILL_AMOUNT
+}
+
+enum AppliesToScope {
+  ALL_ITEMS
+  CATEGORY
+  SPECIFIC_ITEMS
 }
 
 model SpecialOffer {
@@ -346,12 +387,22 @@ model SpecialOffer {
   activeDays        String?   @default("0,1,2,3,4,5,6") // Comma-separated days (0=Sunday, 6=Saturday)
   minBillAmount     Float?    // For percentage discount offers
   discountPercentage Float?   // For percentage discount offers
-  // Cart Trigger fields
+  // Cart Trigger fields (legacy - kept for backward compatibility)
   triggerType       TriggerType? // For CART_TRIGGER offers
   triggerCategories String?   @db.Text // JSON array of category IDs
   triggerProducts   String?   @db.Text // JSON array of product IDs
   triggerMinAmount  Float?    // Minimum bill amount to trigger
   rewardItems       String?   @db.Text // JSON array of reward items: [{ productId: number, quantity: number, isFree: boolean, discountPrice: number }]
+  // New Buy X Get Y fields
+  appliesToScope    AppliesToScope? // For BUY_X_GET_Y offers
+  minQty            Int       @default(1) // Minimum quantity required
+  minSpend          Float?    // Minimum spend amount required
+  rewardProductId   Int?      // Reference to Product for reward item
+  rewardQty         Int       @default(1) // Reward quantity
+  rewardDiscountPercent Float? @default(100.0) // Discount percentage for reward (100 = free)
+  // Cart Threshold fields
+  minCartAmount     Float?    // Minimum cart subtotal required to trigger CART_THRESHOLD offer
+  rewardType        String?   // Reward type for CART_THRESHOLD (e.g., 'FREE_ITEM')
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 }
@@ -403,7 +454,7 @@ model PurchaseOrder {
   supplierId      Int
   orderDate       DateTime @default(now())
   expectedDate    DateTime?
-  status          String?
+  status          POStatus @default(DRAFT)
   totalAmount     Float?
   notes           String?
   supplier        Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
@@ -485,4 +536,23 @@ model NotificationLog {
   status    String   // "SUCCESS", "FAILED"
   error     String?
   createdAt DateTime @default(now())
+}
+
+model ShiftAuditLog {
+  id          Int      @id @default(autoincrement())
+  shiftId     Int
+  shift       Shift    @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+  actionType  String   // "PAUSED", "RESUMED", "STARTED", "ENDED", "SWITCHED_OUT", "SWITCHED_IN"
+  fromUserId  Int?     // User who was active before this action
+  toUserId    Int?     // User who became active after this action
+  fromUser    User?    @relation("ShiftAuditFrom", fields: [fromUserId], references: [id], onDelete: SetNull)
+  toUser      User?    @relation("ShiftAuditTo", fields: [toUserId], references: [id], onDelete: SetNull)
+  salesSnapshot Float? // Sales total at the time of action
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@index([shiftId])
+  @@index([createdAt])
+  @@index([fromUserId])
+  @@index([toUserId])
 }

@@ -206,13 +206,13 @@ export default function Sidebar({ role, storeSettings }: SidebarProps) {
                     href={item.href}
                     onClick={() => setIsOpen(false)}
                     className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-all ${
-                      item.isBilling
+                      item.isBilling && pathname === item.href
                         ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white font-bold shadow-lg hover:from-purple-700 hover:to-pink-700'
                         : pathname === item.href
                         ? 'text-white'
                         : 'text-gray-300 hover:bg-gray-800 hover:text-white'
                     }`}
-                    style={!item.isBilling && pathname === item.href ? accentBg : undefined}
+                    style={!(item.isBilling && pathname === item.href) && pathname === item.href ? accentBg : undefined}
                     title={isCollapsed ? item.name : ''}
                   >
                     <span className="text-lg flex-shrink-0">{item.icon}</span>

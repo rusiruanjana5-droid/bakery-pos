@@ -1,6 +1,6 @@
 'use server'
 
-import prisma, { localPrisma } from '@/db'
+import prisma, { getLocalPrisma } from '@/db'
 import bcrypt from 'bcryptjs'
 import { setSession, destroySession, SessionData, sessionOptions } from '@/lib/session'
 import { redirect } from 'next/navigation'
@@ -22,8 +22,12 @@ export async function login(formData: FormData) {
     })
   } catch (error) {
     console.warn('Primary database unreachable, trying local database for login:', error)
+    const localPrisma = getLocalPrisma()
+    if (!localPrisma) {
+      console.error('Local database client not initialized')
+      redirect('/login?error=database')
+    }
     try {
-      // Fallback to local SQLite database
       user = await (localPrisma as any).localUser.findUnique({
         where: { username }
       })
@@ -59,13 +63,12 @@ export async function login(formData: FormData) {
     )
   }
 
-  // Clear any cached shift data in session storage (client-side will handle this)
   // Redirect cashiers to shift check page (shift will be started via modal)
   if (user.role === 'CASHIER') {
     redirect('/pos?checkShift=true&forceRefresh=true')
-  } else {
-    redirect('/')
   }
+
+  redirect('/')
 }
 
 // Helper function to send login notification asynchronously
@@ -112,6 +115,11 @@ export async function register(formData: FormData) {
     })
   } catch (error) {
     console.warn('Primary database unreachable, trying local database for registration check:', error)
+    const localPrisma = getLocalPrisma()
+    if (!localPrisma) {
+      console.error('Local database client not initialized')
+      return { success: false, error: 'Database unreachable' }
+    }
     try {
       existingUser = await (localPrisma as any).localUser.findUnique({
         where: { username }
@@ -138,9 +146,15 @@ export async function register(formData: FormData) {
     })
   } catch (error) {
     console.warn('Primary database unreachable, creating user in local database:', error)
+    const localPrisma = getLocalPrisma()
+    if (!localPrisma) {
+      console.error('Local database client not initialized')
+      return { success: false, error: 'Database unreachable' }
+    }
     try {
       await (localPrisma as any).localUser.create({
         data: {
+          cloudId: 0,
           username,
           password: hashedPassword,
           role,
@@ -167,6 +181,11 @@ export async function verifyPin(pin: string) {
     })
   } catch (error) {
     console.warn('Primary database unreachable, trying local database for PIN verification:', error)
+    const localPrisma = getLocalPrisma()
+    if (!localPrisma) {
+      console.error('Local database client not initialized')
+      return { success: false, error: 'Database unreachable' }
+    }
     try {
       user = await (localPrisma as any).localUser.findFirst({
         where: {
@@ -198,6 +217,11 @@ export async function verifyPinForScreenUnlock(pin: string) {
     })
   } catch (error) {
     console.warn('Primary database unreachable, trying local database for PIN verification:', error)
+    const localPrisma = getLocalPrisma()
+    if (!localPrisma) {
+      console.error('Local database client not initialized')
+      return { success: false, error: 'Database unreachable' }
+    }
     try {
       user = await (localPrisma as any).localUser.findFirst({
         where: {
@@ -215,7 +239,6 @@ export async function verifyPinForScreenUnlock(pin: string) {
     return { success: false, error: 'Invalid PIN' }
   }
 
-  // Check if user has permission to unlock screen (Admin always has permission)
   if (user.role !== 'ADMIN' && !user.canUnlockScreen) {
     return { success: false, error: 'Unauthorized: Only users with Lock Screen access can unlock this session.' }
   }
@@ -235,6 +258,11 @@ export async function verifyManagerPin(pin: string) {
     })
   } catch (error) {
     console.warn('Primary database unreachable, trying local database for manager PIN verification:', error)
+    const localPrisma = getLocalPrisma()
+    if (!localPrisma) {
+      console.error('Local database client not initialized')
+      return { success: false, error: 'Database unreachable' }
+    }
     try {
       user = await (localPrisma as any).localUser.findFirst({
         where: {
@@ -267,6 +295,11 @@ export async function switchUserByPin(pin: string, currentUserId?: number, curre
     })
   } catch (error) {
     console.warn('Primary database unreachable, trying local database for user switch:', error)
+    const localPrisma = getLocalPrisma()
+    if (!localPrisma) {
+      console.error('Local database client not initialized')
+      return { success: false, error: 'Database unreachable' }
+    }
     try {
       user = await (localPrisma as any).localUser.findFirst({
         where: {
@@ -284,7 +317,6 @@ export async function switchUserByPin(pin: string, currentUserId?: number, curre
     return { success: false, error: 'Invalid PIN' }
   }
 
-  // Pause current user's shift if they have an active shift (for mid-shift handover)
   if (currentUserId && currentShiftId && user.role === 'CASHIER') {
     try {
       const pauseResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/shift/pause`, {
@@ -300,11 +332,9 @@ export async function switchUserByPin(pin: string, currentUserId?: number, curre
       }
     } catch (error) {
       console.error('Error pausing current shift:', error)
-      // Continue with switch even if pause fails
     }
   }
 
-  // Set session directly in server action
   const cookieStore = await cookies()
   const session = await getIronSession<SessionData>(cookieStore, sessionOptions)
   session.userId = user.id
@@ -313,7 +343,6 @@ export async function switchUserByPin(pin: string, currentUserId?: number, curre
   session.isLoggedIn = true
   await session.save()
 
-  // Resume or start shift for the new cashier
   if (user.role === 'CASHIER') {
     try {
       const resumeResponse = await fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/shift/resume-or-start`, {
@@ -326,13 +355,12 @@ export async function switchUserByPin(pin: string, currentUserId?: number, curre
         const result = await resumeResponse.json()
         console.log('Shift action completed:', result.action, result.message)
         return { success: true, user, shiftAction: result.action, shift: result.shift }
-      } else {
-        console.error('Failed to resume/start shift:', await resumeResponse.text())
-        return { success: true, user, shiftAction: 'FAILED' }
       }
+
+      console.error('Failed to resume/start shift:', await resumeResponse.text())
+      return { success: true, user, shiftAction: 'FAILED' }
     } catch (error) {
       console.error('Error in resume/start shift:', error)
-      // Fallback to legacy startShift if API fails
       const shiftResult = await startShift(user.id)
       return { success: true, user, shiftAction: 'STARTED', shift: shiftResult.shift }
     }

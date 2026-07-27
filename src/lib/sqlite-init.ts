@@ -1,4 +1,4 @@
-import { localPrisma } from '@/db'
+import { getLocalPrisma } from '@/db'
 import { execSync } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -82,6 +82,12 @@ export async function initializeSQLiteDatabase() {
       }
     }
     
+    const localPrisma = getLocalPrisma()
+    if (!localPrisma) {
+      console.warn('Local database client not initialized; skipping SQLite setup')
+      return
+    }
+
     // Test connection with localPrisma
     try {
       await localPrisma.$connect()
